@@ -1,0 +1,5 @@
+name: Add PR Review Checklist
+on: [pull_request]
+jobs:
+  add-pr-review-checklist:
+    uses: ./.github/workflows/auto_comment_template.yaml
