@@ -1,0 +1,65 @@
+name: Add PR Review Checklist
+on: [workflow_call]
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: wow-actions/auto-comment@v1
+        with:
+          pullRequestOpened: |
+            # PR Review Checklist
+
+            Do not edit the content of this comment. The PR reviewer  should simply update this comment by ticking each review item below, as they get completed.
+
+            ---
+
+            ****************************Main Reviewer:**************************** name
+
+            - [ ] 1. This is a minor change so the checks below do not apply and have not been investigated.
+
+            **************************************************Security (OWASP top ~10)**************************************************
+
+            - [ ] 2.1 Broken Access Control - [https://owasp.org/Top10/A01_2021-Broken_Access_Control/](https://owasp.org/Top10/A01_2021-Broken_Access_Control/)
+            - [ ] 2.2 Cryptographic Failures - [https://owasp.org/Top10/A02_2021-Cryptographic_Failures/](https://owasp.org/Top10/A02_2021-Cryptographic_Failures/)
+            - [ ] 2.3 Injection - [https://owasp.org/Top10/A03_2021-Injection/](https://owasp.org/Top10/A03_2021-Injection/)
+            - [ ] 2.4 Insecure Design - [https://owasp.org/Top10/A04_2021-Insecure_Design/](https://owasp.org/Top10/A04_2021-Insecure_Design/)
+            - [ ] 2.5 Security Misconfiguration - [https://owasp.org/Top10/A05_2021-Security_Misconfiguration/](https://owasp.org/Top10/A05_2021-Security_Misconfiguration/)
+            - [ ] 2.6 Vulnerable and Outdated Components - [https://owasp.org/Top10/A06_2021-Vulnerable_and_Outdated_Components/](https://owasp.org/Top10/A06_2021-Vulnerable_and_Outdated_Components/) (not needed because of DependaBot?)
+            - [ ] 2.7 Identification and Authentication Failures - [https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/](https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/)
+            - [ ] 2.8 Software and Data Integrity Failures - [https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/](https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/)
+            - [ ] 2.9 Server-side Request Forgery - [https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_(SSRF)/](https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/)
+
+            **Code**
+
+            - [ ] 3.1 Packages, classes, and methods have a single domain of responsibility.
+            - [ ] 3.2 Packages, classes, and methods are grouped into cohesive and consistent domain model.
+            - [ ] 3.3 The code is canonical and the minimum required to achieve the goal.
+            - [ ] 3.4 Modules, libraries, and APIs are easy to use, robust (foolproof and not errorprone), and tested.
+            - [ ] 3.5 Logic and naming has clear narrative that communicates the accurate intent and responsibility of each module (e.g. method, class, etc.).
+            - [ ] 3.6 The code is algorithmically efficient and scalable for the whole application.
+            - [ ] 3.7 The new changes have automated tests to cover the business requirements (caveat: we must let this requirement slide for any repos that are difficult to test, or any repos where the tests are being refactored).
+
+            **************************Observability**************************
+
+            Also covers OWASP top 10: Security Logging and Monitoring Failures - [https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures/](https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures/)
+
+            - [ ] 4.1 All logs containing PII are either set to the *****debug***** level or anonymised
+            - [ ] 4.2 Auditable events (for security), such as logins and failures, are logged
+            - [ ] 4.3 Error and warning logs will not be vague
+            - [ ] 4.4 If a new service: the deployment to Prod will include appropriate alerts (requires confirmation with PR submitter). An alert is appropriate iff it triggers on an error or messages in a DLQ, and it is the service’s responsibility to decide whether an error is critical (i.e., not the callee’s). Examples:
+              - Service A calls service B to retrieve a lease. If service B fails there should be no alert because it is service A’s responsibility to decide whether this is a critical failure.
+              - Service B receives an async event to insert a lease. It is service B’s responsibility to raise an alert because no other service will be aware of the failure.
+
+            **Architecture**
+
+            - [ ] 5.1 Any required refactoring is completed, and the architecture does not introduce technical debt incidentally.
+            - [ ] 5.2 Any required build and release automations are updated and/or implemented.
+            - [ ] 5.3 Any new components follows a consistent style with respect to the pre-existing codebase.
+            - [ ] 5.4 The architecture intuitively reflects the application domain, and is easy to understand.
+            - [ ] 5.5 The architecture has a well-defined hierarchy of encapsulated components.
+            - [ ] 5.6 The architecture is extensible and scalable.
+
+            ****************************Technical Debt****************************
+
+            - [ ] 6.1 There are no outstanding technical debt issues that these changes should address
+            - [ ] 6.2 Each mitigating technical debt for not meeting some of these requirements has a repository ticket and an associated Kanban ticket for prioritisation.
