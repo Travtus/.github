@@ -2,7 +2,7 @@ name: Add PR Review Checklist
 on:
   workflow_call:
     secrets:
-      GITHUB_TOKEN:
+      GH_TOKEN:
         description: 'Github token passed from the caller workflow'
         required: false
 
