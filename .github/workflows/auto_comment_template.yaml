@@ -1,11 +1,18 @@
 name: Add PR Review Checklist
-on: [workflow_call]
+on:
+  workflow_call:
+    secrets:
+      GITHUB_TOKEN:
+        description: 'Github token passed from the caller workflow'
+        required: false
+
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
       - uses: wow-actions/auto-comment@v1
         with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           pullRequestOpened: |
             # PR Review Checklist
 
