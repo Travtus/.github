@@ -1,0 +1,48 @@
+name: Build and deploy SAM template
+
+on:
+  workflow_call:
+    secrets:
+      PAT_GITHUB:
+        required: true
+      AWS_OIDC_ROLE_ARN:
+        required: true
+    inputs:
+      TOML_CONFIG:
+        required: false
+        default: dev
+        type: string
+
+permissions:
+  id-token: write # This is required for requesting the JWT
+  contents: read  # This is required for actions/checkout
+
+env:
+  GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
+
+jobs:
+  build-sam-template:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v3
+      - uses: aws-actions/setup-sam@v2
+      - name: Build SAM
+        run: sam build --use-container -p -c --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
+  deploy-sam:
+    runs-on: ubuntu-latest
+    needs: build-sam-template
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v3
+      - uses: aws-actions/setup-sam@v2
+      - name: Configure AWS credentials for DEV
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          role-session-name: samplerolesession
+          aws-region: us-east-2
+      - name: Validate template
+        run: sam validate
+      - name: Deploy SAM template
+        run: sam deploy --config-env ${{ inputs.TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM
