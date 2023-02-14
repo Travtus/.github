@@ -37,58 +37,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-python@v3
-      - uses: aws-actions/setup-sam@v2
-      - name: Build SAM
-        run: sam build --use-container -p -c --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
+      - uses: ./.github/actions/sam-build
+        with:
+          PAT_GITHUB: ${{ secrets.PAT_GITHUB }}
   deploy-dev:
     runs-on: ubuntu-latest
     needs: build-sam-template
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-python@v3
-      - uses: aws-actions/setup-sam@v2
-      - name: Configure AWS credentials for DEV
-        uses: aws-actions/configure-aws-credentials@v1
+      - uses: ./.github/actions/sam-deploy
         with:
-          role-to-assume: ${{ secrets.AWS_DEV_OIDC_ROLE_ARN }}
-          role-session-name: samplerolesession
-          aws-region: us-east-2
-      - name: Validate template
-        run: sam validate
-      - name: Deploy SAM template
-        run: sam deploy --config-env ${{ inputs.DEV_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM
-  deploy-qa:
-    runs-on: ubuntu-latest
-    needs: deploy-dev
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v3
-      - uses: aws-actions/setup-sam@v2
-      - name: Configure AWS credentials for DEV
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          role-to-assume: ${{ secrets.AWS_QA_OIDC_ROLE_ARN }}
-          role-session-name: samplerolesession
-          aws-region: us-east-2
-      - name: Validate template
-        run: sam validate
-      - name: Deploy SAM template
-        run: sam deploy --config-env ${{ inputs.QA_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM
-  deploy-uat:
-    runs-on: ubuntu-latest
-    needs: deploy-qa
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v3
-      - uses: aws-actions/setup-sam@v2
-      - name: Configure AWS credentials for DEV
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          role-to-assume: ${{ secrets.AWS_UAT_OIDC_ROLE_ARN }}
-          role-session-name: samplerolesession
-          aws-region: us-east-2
-      - name: Validate template
-        run: sam validate
-      - name: Deploy SAM template
-        run: sam deploy --config-env ${{ inputs.UAT_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM
+          AWS_OIDC_ROLE_ARN: ${{ secrets.AWS_DEV_OIDC_ROLE_ARN }}
+          TOML_CONFIG: ${{ inputs.DEV_TOML_CONFIG }}
+          PAT_GITHUB: ${{ secrets.PAT_GITHUB }}

@@ -1,0 +1,17 @@
+name: Deploy SAM template
+
+secrets:
+  PAT_GITHUB:
+    required: true
+
+env:
+  GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-python@v3
+    - uses: aws-actions/setup-sam@v2
+    - name: Build SAM
+      run: sam build --use-container -p -c --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
