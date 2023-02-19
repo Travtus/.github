@@ -33,20 +33,13 @@ env:
   GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
 
 jobs:
-  build-sam-template:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v3
-      - uses: aws-actions/setup-sam@v2
-      - name: Build SAM
-        run: sam build --use-container -p -c --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
   deploy-dev:
     runs-on: ubuntu-latest
-    needs: build-sam-template
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-python@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.8"
       - uses: aws-actions/setup-sam@v2
       - name: Configure AWS credentials for DEV
         uses: aws-actions/configure-aws-credentials@v1
@@ -54,41 +47,51 @@ jobs:
           role-to-assume: ${{ secrets.AWS_DEV_OIDC_ROLE_ARN }}
           role-session-name: samplerolesession
           aws-region: us-east-2
+      - name: Build SAM
+        run: sam build --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
       - name: Validate template
         run: sam validate
       - name: Deploy SAM template
-        run: sam deploy --config-env ${{ inputs.DEV_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM
+        run: sam deploy --config-env ${{ inputs.DEV_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset
   deploy-qa:
     runs-on: ubuntu-latest
     needs: deploy-dev
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-python@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.8"
       - uses: aws-actions/setup-sam@v2
-      - name: Configure AWS credentials for DEV
+      - name: Configure AWS credentials for QA
         uses: aws-actions/configure-aws-credentials@v1
         with:
           role-to-assume: ${{ secrets.AWS_QA_OIDC_ROLE_ARN }}
           role-session-name: samplerolesession
           aws-region: us-east-2
+      - name: Build SAM
+        run: sam build --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
       - name: Validate template
         run: sam validate
       - name: Deploy SAM template
-        run: sam deploy --config-env ${{ inputs.QA_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM
+        run: sam deploy --config-env ${{ inputs.QA_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset
   deploy-uat:
     runs-on: ubuntu-latest
     needs: deploy-qa
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-python@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.8"
       - uses: aws-actions/setup-sam@v2
-      - name: Configure AWS credentials for DEV
+      - name: Configure AWS credentials for UAT
         uses: aws-actions/configure-aws-credentials@v1
         with:
           role-to-assume: ${{ secrets.AWS_UAT_OIDC_ROLE_ARN }}
           role-session-name: samplerolesession
           aws-region: us-east-2
+      - name: Build SAM
+        run: sam build --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
       - name: Validate template
         run: sam validate
       - name: Deploy SAM template
-        run: sam deploy --config-env ${{ inputs.UAT_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM
+        run: sam deploy --config-env ${{ inputs.UAT_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset
