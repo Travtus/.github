@@ -1,6 +1,10 @@
 name: Python package
 
-on: [workflow_call]
+on:
+  workflow_call:
+    secrets:
+      PAT_GITHUB:
+        required: false
 
 env:
   GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
