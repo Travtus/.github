@@ -44,4 +44,4 @@ jobs:
       - name: Validate template
         run: sam validate
       - name: Deploy SAM template
-        run: sam deploy --template-file ${{ inputs.TEMPLATE_NAME }} --config-env ${{ inputs.TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset
+        run: sam deploy --config-env ${{ inputs.TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset
