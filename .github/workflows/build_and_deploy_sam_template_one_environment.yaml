@@ -12,6 +12,10 @@ on:
         required: false
         default: dev
         type: string
+      TEMPLATE_NAME:
+        required: false
+        default: template.yaml
+        type: string
 
 permissions:
   id-token: write # This is required for requesting the JWT
@@ -36,8 +40,8 @@ jobs:
           role-session-name: samplerolesession
           aws-region: us-east-2
       - name: Build SAM
-        run: sam build --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
+        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
       - name: Validate template
         run: sam validate
       - name: Deploy SAM template
-        run: sam deploy --config-env ${{ inputs.TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset
+        run: sam deploy --template-file ${{ inputs.TEMPLATE_NAME }} --config-env ${{ inputs.TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset
