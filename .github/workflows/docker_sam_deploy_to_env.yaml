@@ -1,0 +1,49 @@
+name: Docker+SAM deploy for one environment
+
+on: 
+  workflow_call:
+    secrets:
+      PAT_GITHUB:
+        required: true
+      AWS_OIDC_ROLE_ARN:
+        required: true
+      AWS_ACCOUNT:
+        required: true
+    inputs:
+      AWS_REGION:
+        required: false
+        default: us-east-2
+        type: string
+      ECR_REPO_NAME:
+        required: true
+        type: string
+      TOML_CONFIG:
+        required: false
+        default: dev
+        type: string
+      TEMPLATE_NAME:
+        required: false
+        default: template.yaml
+        type: string
+
+
+jobs:
+  build-and-deploy-docker-image:
+    uses: Travtus/.github/.github/workflows/build_and_deploy_docker_to_ecr.yaml@main
+    secrets:
+      PAT_GITHUB: ${{ secrets.PAT_GITHUB }}
+      AWS_OIDC_ROLE_ARN: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+      AWS_ACCOUNT: ${{ secrets.AWS_ACCOUNT }}
+    with:
+      AWS_REGION: ${{ inputs.AWS_REGION }}
+      ECR_REPO_NAME: ${{ inputs.ECR_REPO_NAME }}
+  build-and-deploy-sam-template:
+    needs: build-and-deploy-docker-image
+    uses: Travtus/.github/.github/workflows/build_and_deploy_sam_template_one_environment.yaml@main
+    secrets:
+      PAT_GITHUB: ${{ secrets.PAT_GITHUB }}
+      AWS_OIDC_ROLE_ARN: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+    with:
+      TOML_CONFIG: ${{ inputs.TOML_CONFIG }}
+      TEMPLATE_NAME: ${{ inputs.TEMPLATE_NAME }}
+  
