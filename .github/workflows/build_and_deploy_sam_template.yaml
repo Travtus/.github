@@ -56,7 +56,7 @@ jobs:
       - name: Validate template
         run: sam validate
       - name: Deploy SAM template
-        run: sam deploy --config-file ${{ inputs.CONFIG_FILE }} --config-env ${{ inputs.DEV_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset
+        run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.DEV_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset
   deploy-qa:
     runs-on: ubuntu-latest
     needs: deploy-dev
@@ -77,7 +77,7 @@ jobs:
       - name: Validate template
         run: sam validate
       - name: Deploy SAM template
-        run: sam deploy --config-file ${{ inputs.CONFIG_FILE }} --config-env ${{ inputs.QA_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset
+        run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.QA_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset
   deploy-uat:
     runs-on: ubuntu-latest
     needs: deploy-qa
