@@ -16,6 +16,11 @@ on:
         required: false
         default: template.yaml
         type: string
+      TOML_CONFIG_FILE:
+        required: false
+        default: samconfig.toml
+        type: string
+
 
 permissions:
   id-token: write # This is required for requesting the JWT
@@ -44,4 +49,4 @@ jobs:
       - name: Validate template
         run: sam validate
       - name: Deploy SAM template
-        run: sam deploy --config-env ${{ inputs.TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset
+        run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset
