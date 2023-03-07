@@ -24,7 +24,7 @@ on:
         required: false
         default: uat
         type: string
-      CONFIG_FILE:
+      TOML_CONFIG_FILE:
         required: false
         default: samconfig.toml
         type: string
