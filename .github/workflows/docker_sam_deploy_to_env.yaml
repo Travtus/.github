@@ -25,6 +25,10 @@ on:
         required: false
         default: template.yaml
         type: string
+      CONFIG_FILE:
+        required: false
+        default: samconfig.toml
+        type: string
 
 
 jobs:
@@ -46,4 +50,4 @@ jobs:
     with:
       TOML_CONFIG: ${{ inputs.TOML_CONFIG }}
       TEMPLATE_NAME: ${{ inputs.TEMPLATE_NAME }}
-  
+      CONFIG_FILE: ${{ inputs.CONFIG_FILE }}
