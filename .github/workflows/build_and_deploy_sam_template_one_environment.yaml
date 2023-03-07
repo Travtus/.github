@@ -16,7 +16,7 @@ on:
         required: false
         default: template.yaml
         type: string
-      CONFIG_FILE:
+      TOML_CONFIG_FILE:
         required: false
         default: samconfig.toml
         type: string
