@@ -1,0 +1,52 @@
+name: InstallZipAndUploadToS3
+on:
+  workflow_call:
+    inputs:
+      PACKAGE_NAME:
+        description: 'Name of the package'
+        required: true
+        type: string
+      FULLY_QUALIFIED_BUCKET:
+        description: 'Fully qualified bucket of the form s3://...'
+        required: true
+        type: string
+    secrets:
+      OIDC_ROLE_ARN:
+        required: true
+        description: 'ARN of the OIDC Role'
+      PAT_GITHUB:
+        required: true
+
+env:
+  GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
+
+permissions:
+  id-token: write # This is required for requesting the JWT
+  contents: read  # This is required for actions/checkout
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.8"]
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+      - run: |
+          python -m venv ./venv
+          python -m pip install --upgrade pip
+          source ./venv/bin/activate
+          pip install -r requirements.txt
+      - name: Zip file
+        run: zip -r -q ${{ inputs.PACKAGE_NAME }}.zip ./venv/lib/python3.8/site-packages/${{ inputs.PACKAGE_NAME }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: ${{ secrets.OIDC_ROLE_ARN }}
+          role-session-name: samplerolesession
+          aws-region: us-east-2
+      - name: Upload to S3
+        run: aws s3 cp ${{ inputs.PACKAGE_NAME }}.zip ${{ inputs.FULLY_QUALIFIED_BUCKET }}
