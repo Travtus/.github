@@ -41,7 +41,9 @@ jobs:
           source ./venv/bin/activate
           pip install -r requirements.txt
       - name: Zip file
-        run: zip -r -q ${{ inputs.PACKAGE_NAME }}.zip ./venv/lib/python3.8/site-packages/${{ inputs.PACKAGE_NAME }}
+        run: |
+          cd ./venv/lib/python3.8/site-packages
+          zip -r -q ${{ inputs.PACKAGE_NAME }}.zip ${{ inputs.PACKAGE_NAME }}
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
@@ -49,4 +51,6 @@ jobs:
           role-session-name: samplerolesession
           aws-region: us-east-2
       - name: Upload to S3
-        run: aws s3 cp ${{ inputs.PACKAGE_NAME }}.zip ${{ inputs.FULLY_QUALIFIED_BUCKET }}
+        run: | 
+          cd ./venv/lib/python3.8/site-packages
+          aws s3 cp ${{ inputs.PACKAGE_NAME }}.zip ${{ inputs.FULLY_QUALIFIED_BUCKET }}
