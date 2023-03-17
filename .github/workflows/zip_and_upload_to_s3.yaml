@@ -1,0 +1,39 @@
+name: ZipAndUploadToS3
+on:
+  workflow_call:
+    inputs:
+      DIRECTORY_LOCATION:
+        description: 'Location of the directory to zip and upload'
+        required: true
+        type: string
+      FULLY_QUALIFIED_BUCKET:
+        description: 'Fully qualified bucket of the form s3://...'
+        required: true
+        type: string
+    secrets:
+      OIDC_ROLE_ARN:
+        required: true
+        description: 'ARN of the OIDC Role'
+
+permissions:
+  id-token: write # This is required for requesting the JWT
+  contents: read  # This is required for actions/checkout
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.8"]
+    steps:
+      - uses: actions/checkout@v3
+      - name: Zip file
+        run: zip -r -q ${{ inputs.DIRECTORY_LOCATION }}.zip ${{ inputs.DIRECTORY_LOCATION }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: ${{ secrets.OIDC_ROLE_ARN }}
+          role-session-name: samplerolesession
+          aws-region: us-east-2
+      - name: Upload to S3
+        run: aws s3 cp ${{ inputs.DIRECTORY_LOCATION }}.zip ${{ inputs.FULLY_QUALIFIED_BUCKET }}
