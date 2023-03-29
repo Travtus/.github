@@ -14,11 +14,6 @@ on:
       OIDC_ROLE_ARN:
         required: true
         description: 'ARN of the OIDC Role'
-      PAT_GITHUB:
-        required: true
-
-env:
-  GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
 
 permissions:
   id-token: write # This is required for requesting the JWT
