@@ -25,16 +25,8 @@ jobs:
 
             **************************************************Security (OWASP top ~10)**************************************************
 
-            - [ ] 2.1 Broken Access Control - [https://owasp.org/Top10/A01_2021-Broken_Access_Control/](https://owasp.org/Top10/A01_2021-Broken_Access_Control/)
-            - [ ] 2.2 Cryptographic Failures - [https://owasp.org/Top10/A02_2021-Cryptographic_Failures/](https://owasp.org/Top10/A02_2021-Cryptographic_Failures/)
-            - [ ] 2.3 Injection - [https://owasp.org/Top10/A03_2021-Injection/](https://owasp.org/Top10/A03_2021-Injection/)
-            - [ ] 2.4 Insecure Design - [https://owasp.org/Top10/A04_2021-Insecure_Design/](https://owasp.org/Top10/A04_2021-Insecure_Design/)
-            - [ ] 2.5 Security Misconfiguration - [https://owasp.org/Top10/A05_2021-Security_Misconfiguration/](https://owasp.org/Top10/A05_2021-Security_Misconfiguration/)
-            - [ ] 2.6 Vulnerable and Outdated Components - [https://owasp.org/Top10/A06_2021-Vulnerable_and_Outdated_Components/](https://owasp.org/Top10/A06_2021-Vulnerable_and_Outdated_Components/) (not needed because of DependaBot?)
-            - [ ] 2.7 Identification and Authentication Failures - [https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/](https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/)
-            - [ ] 2.8 Software and Data Integrity Failures - [https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/](https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/)
-            - [ ] 2.9 Server-side Request Forgery - [https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_(SSRF)/](https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/)
-
+            - [ ] 2. Does not violate OWASP top-10 security concerns or other security concerns - https://owasp.org/Top10
+            
             **Code**
 
             - [ ] 3.1 Packages, classes, and methods have a single domain of responsibility.
@@ -44,10 +36,9 @@ jobs:
             - [ ] 3.5 Logic and naming has clear narrative that communicates the accurate intent and responsibility of each module (e.g. method, class, etc.).
             - [ ] 3.6 The code is algorithmically efficient and scalable for the whole application.
             - [ ] 3.7 The new changes have automated tests to cover the business requirements (caveat: we must let this requirement slide for any repos that are difficult to test, or any repos where the tests are being refactored).
+            - [ ] 3.8 There is schema-based validation of all incoming/outgoing requests and events.
 
             **************************Observability**************************
-
-            Also covers OWASP top 10: Security Logging and Monitoring Failures - [https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures/](https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures/)
 
             - [ ] 4.1 All logs containing PII are either set to the *****debug***** level or anonymised
             - [ ] 4.2 Auditable events (for security), such as logins and failures, are logged
@@ -58,12 +49,7 @@ jobs:
 
             **Architecture**
 
-            - [ ] 5.1 Any required refactoring is completed, and the architecture does not introduce technical debt incidentally.
-            - [ ] 5.2 Any required build and release automations are updated and/or implemented.
-            - [ ] 5.3 Any new components follows a consistent style with respect to the pre-existing codebase.
-            - [ ] 5.4 The architecture intuitively reflects the application domain, and is easy to understand.
-            - [ ] 5.5 The architecture has a well-defined hierarchy of encapsulated components.
-            - [ ] 5.6 The architecture is extensible and scalable.
+            - [ ] 5. If a change in overall design, then the architecture has undergone a design review.
 
             ****************************Technical Debt****************************
 
