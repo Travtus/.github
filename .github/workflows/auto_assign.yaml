@@ -1,0 +1,14 @@
+name: Auto assigns PR to developers group
+on: [pull_request]
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: wow-actions/auto-assign@v3
+        with:
+          GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
+          # using the `org/team_slug` or `/team_slug` syntax to add git team as reviewers
+          reviewers: |
+            Travtus/developers
+          addReviewers: true
+          addAssignees: false
