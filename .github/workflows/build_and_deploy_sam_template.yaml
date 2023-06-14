@@ -55,10 +55,10 @@ jobs:
           role-to-assume: ${{ secrets.AWS_DEV_OIDC_ROLE_ARN }}
           role-session-name: samplerolesession
           aws-region: us-east-2
-      - name: Build SAM
-        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
       - name: Validate template
         run: sam validate
+      - name: Build SAM
+        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
       - name: Deploy SAM template
         run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.DEV_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset
   deploy-qa:
@@ -76,10 +76,10 @@ jobs:
           role-to-assume: ${{ secrets.AWS_QA_OIDC_ROLE_ARN }}
           role-session-name: samplerolesession
           aws-region: us-east-2
-      - name: Build SAM
-        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
       - name: Validate template
         run: sam validate
+      - name: Build SAM
+        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
       - name: Deploy SAM template
         run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.QA_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset
   deploy-uat:
@@ -97,9 +97,9 @@ jobs:
           role-to-assume: ${{ secrets.AWS_UAT_OIDC_ROLE_ARN }}
           role-session-name: samplerolesession
           aws-region: us-east-2
-      - name: Build SAM
-        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
       - name: Validate template
         run: sam validate
+      - name: Build SAM
+        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
       - name: Deploy SAM template
         run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.UAT_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset
