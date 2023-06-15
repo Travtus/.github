@@ -44,9 +44,9 @@ jobs:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           role-session-name: samplerolesession
           aws-region: us-east-2
-      - name: Build SAM
-        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
       - name: Validate template
         run: sam validate --template-file ${{ inputs.TEMPLATE_NAME }}
+      - name: Build SAM
+        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
       - name: Deploy SAM template
         run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset
