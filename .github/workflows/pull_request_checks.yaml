@@ -4,7 +4,7 @@ on:
   workflow_call:
     secrets:
       PAT_GITHUB:
-        required: false
+        required: true
     inputs:
       PYTHON_VERSION:
         type: string
@@ -18,6 +18,11 @@ on:
       ENABLE_BDD:
         type: boolean
         description: Run BDD tests
+        default: false
+        required: false
+      ENABLE_FORMAT:
+        type: boolean
+        description: Run format tools
         default: false
         required: false
 
@@ -51,7 +56,7 @@ jobs:
           pip install flake8 pytest pylint isort black
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
       - name: Format code
-        if: ${{ steps.filter.outputs.changed_py == 'true' }}
+        if: ${{ steps.filter.outputs.changed_py == 'true' && inputs.ENABLE_FORMAT }}
         run: |
           isort ${{ steps.filter.outputs.changed_py_files }}
           black ${{ steps.filter.outputs.changed_py_files }}
