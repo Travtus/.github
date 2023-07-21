@@ -35,8 +35,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-        with:
-          token: ${{ env.GITHUB_TOKEN }}
       - name: Set up Python ${{ inputs.PYTHON_VERSION }}
         uses: actions/setup-python@v4
         with:
@@ -54,7 +52,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install flake8 pytest pylint isort black
-          find . -name "requirements*.txt" -maxdepth 3 -exec pip install --upgrade -r {} \;
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
       - name: Format code
         if: ${{ steps.filter.outputs.changed_py == 'true' && inputs.ENABLE_FORMAT }}
         run: |
