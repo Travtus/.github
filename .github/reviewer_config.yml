@@ -21,6 +21,7 @@ files:
     - backend-team
   '.github/**':
     - backend-team
+    - backend-team
 
 options:
   ignore_draft: true
