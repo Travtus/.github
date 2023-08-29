@@ -1,0 +1,19 @@
+name: Assign PR reviewers
+
+on:
+  pull_request:
+    types: [ready_for_review]
+
+jobs:
+  assign-reviewers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.PAT_GITHUB }}
+      - name: Request review based on files changes
+        uses: necojackarc/auto-request-review@v0.12.0
+        with:
+          token: ${{ secrets.PAT_GITHUB }}
+          config: .github/reviewer_config.yml
+          use_local: true
