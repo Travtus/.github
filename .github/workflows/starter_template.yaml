@@ -31,20 +31,6 @@ env:
   PY_GLOB: "./**/*.py"
 
 jobs:
-  assign-reviewers:
-#    if: github.event.pull_request.action == 'ready_for_review'
-    runs-on: ubuntu-latest
-    steps:
-      - name: get file
-        run: |
-          echo ${{ toJson(github) }}
-          curl -H "Authorization: token ${{ env.GITHUB_TOKEN }}" https://raw.githubusercontent.com/Travtus/.github/auto-assign-reviewers/.github/workflows/auto_request_review.yml > reviewers.yml
-      - name: Request review based on files changes and/or groups the author belongs to
-        uses: necojackarc/auto-request-review@v0.12.0
-        with:
-          token: ${{ env.GITHUB_TOKEN }}
-          config: reviewers.yml
-          use_local: true
   build:
     runs-on: ubuntu-latest
     steps:
