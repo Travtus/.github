@@ -10,12 +10,12 @@ jobs:
   assign-reviewers:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-        with:
-          token: ${{ secrets.GH_TOKEN }}
+      - name: Get config file
+        run: |
+          curl -H "Authorization: token ${{ env.GITHUB_TOKEN }}" https://raw.githubusercontent.com/Travtus/.github/auto-assign-reviewers/.github/reviewer_config.yml > reviewer_config.yml
       - name: Request review based on files changes
         uses: necojackarc/auto-request-review@v0.12.0
         with:
           token: ${{ secrets.GH_TOKEN }}
-          config: .github/reviewer_config.yml
+          config: reviewer_config.yml
           use_local: true

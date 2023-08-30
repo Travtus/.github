@@ -19,7 +19,13 @@ files:
   '**/*.js':
     - frontend-team
     - backend-team
+  '**/*.ts':
+    - frontend-team
+    - backend-team
 
 options:
   ignore_draft: true
+  ignored_keywords:
+    - DO NOT REVIEW
+    - wip
   number_of_reviewers: 2
