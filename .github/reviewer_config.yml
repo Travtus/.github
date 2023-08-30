@@ -14,7 +14,7 @@ reviewers:
 
 files:
   '**/*.py':
-    - data-science
+    - data-science-team
     - backend-team
   '**/*.js':
     - frontend-team
