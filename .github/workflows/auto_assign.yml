@@ -1,0 +1,11 @@
+name: Assign PR reviewers
+
+on:
+  pull_request:
+    types: [ ready_for_review ]
+
+jobs:
+  assign-reviewers:
+    uses: Travtus/.github/.github/workflows/auto_assign_template.yml@auto-assign-reviewers
+    secrets:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

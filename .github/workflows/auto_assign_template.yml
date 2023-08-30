@@ -1,8 +1,10 @@
 name: Assign PR reviewers
 
 on:
-  pull_request:
-    types: [ready_for_review]
+  workflow_call:
+    secrets:
+      GH_TOKEN:
+        required: true
 
 jobs:
   assign-reviewers:
@@ -10,10 +12,10 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         with:
-          token: ${{ secrets.PAT_GITHUB }}
+          token: ${{ secrets.GH_TOKEN }}
       - name: Request review based on files changes
         uses: necojackarc/auto-request-review@v0.12.0
         with:
-          token: ${{ secrets.PAT_GITHUB }}
+          token: ${{ secrets.GH_TOKEN }}
           config: .github/reviewer_config.yml
           use_local: true
