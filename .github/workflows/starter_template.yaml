@@ -25,6 +25,14 @@ on:
         description: Run format tools
         default: false
         required: false
+      ENABLE_RUFF:
+        type: boolean
+        description: Run Ruff
+        required: false
+      ENABLE_MYPY:
+        type: boolean
+        description: Run mypy
+        required: false
 
 env:
   GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
@@ -79,6 +87,13 @@ jobs:
         run: |
           # stop the build if there are Python syntax errors or undefined names
           flake8 . --count --select=E9,F63,F7,F82 --show-source --max-line-length=127 --statistics
+      - name: Lint with ruff
+        if: ${{ steps.filter.outputs.changed_py == 'true' && inputs.ENABLE_RUFF }}
+        uses: chartboost/ruff-action@v1
+      - name: Type check with mypy
+        if: ${{ steps.filter.outputs.changed_py == 'true' && inputs.ENABLE_MYPY }}
+        run: |
+          mypy ${{ steps.filter.outputs.changed_py_files }}
       - name: Test with pytest
         if: ${{ steps.filter.outputs.changed_py == 'true' && inputs.ENABLE_PYTEST }}
         run: |
