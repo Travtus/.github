@@ -6,6 +6,6 @@ on:
 
 jobs:
   assign-reviewers:
-    uses: Travtus/.github/.github/workflows/auto_assign_template.yml@auto-assign-reviewers
+    uses: Travtus/.github/.github/workflows/auto_assign_template.yml@main
     secrets:
       GH_TOKEN: ${{ secrets.PAT_GITHUB }}
