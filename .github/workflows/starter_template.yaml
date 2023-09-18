@@ -15,6 +15,16 @@ on:
         description: Run pytest against test files
         default: true
         required: false
+      ENABLE_COVERAGE:
+        type: boolean
+        description: Run coverage.py against test files
+        default: false
+        required: false
+      COVERAGE_RATE:
+        type: number
+        description: Test coverage for the repository
+        default: 100
+        required: false
       ENABLE_BDD:
         type: boolean
         description: Run BDD tests
@@ -98,6 +108,11 @@ jobs:
         if: ${{ steps.filter.outputs.changed_py == 'true' && inputs.ENABLE_PYTEST }}
         run: |
           python -m pytest
+      - name: Check test coverage
+        if: ${{ steps.filter.outputs.changed_py == 'true' && inputs.ENABLE_COVERAGE }}
+        run: |
+          coverage run -m pytest
+          coverage report -m --fail-under=${{ inputs.COVERAGE_RATE }}
       - name: Test with behave
         if: ${{ steps.filter.outputs.changed_py == 'true' && inputs.ENABLE_BDD }}
         run: |
