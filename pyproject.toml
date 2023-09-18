@@ -66,3 +66,11 @@ ignore  = [
     # Use of `assert` detected
     "S101"
 ]
+
+[tool.coverage.run]
+omit = [
+    # omit interface codes
+    "*/interfaces/*",
+    # omit config classes
+    "*/config*.py",
+    ]
