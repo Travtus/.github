@@ -20,7 +20,7 @@ on:
         description: Run coverage.py against test files
         default: false
         required: false
-      COVERAGE_RATE:
+      COVERAGE_THRESHOLD:
         type: number
         description: Test coverage for the repository
         default: 100
@@ -112,7 +112,7 @@ jobs:
         if: ${{ steps.filter.outputs.changed_py == 'true' && inputs.ENABLE_COVERAGE }}
         run: |
           coverage run -m pytest
-          coverage report -m --fail-under=${{ inputs.COVERAGE_RATE }}
+          coverage report -m --fail-under=${{ inputs.COVERAGE_THRESHOLD }}
       - name: Test with behave
         if: ${{ steps.filter.outputs.changed_py == 'true' && inputs.ENABLE_BDD }}
         run: |
