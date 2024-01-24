@@ -1,0 +1,49 @@
+name: Checkov scan
+
+on:
+  workflow_call:
+    secrets:
+      PAT_GITHUB:
+        required: true
+    inputs:
+      PYTHON_VERSION:
+        type: string
+        default: "3.8"
+        required: false
+      CHECKOV_SCAN_DIRECTORY:
+        type: string
+        description: Directory to run IaC scan against
+        default: "."
+        required: false
+      CHECKOV_SCAN_FRAMEWORK:
+        type: string
+        description: Framework to use for checkov scans
+        default: "cloudformation"
+        required: false
+      CHECKOV_OUTPUT_ONLY_FAILING_CHECKS:
+        type: boolean
+        description: Controls whether the checkov scan only displays failing checks
+        default: true
+        required: false
+        
+
+env:
+  GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          token: ${{ env.GITHUB_TOKEN }}
+      - name: Set up Python ${{ inputs.PYTHON_VERSION }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ inputs.PYTHON_VERSION }}
+      - name: Run IaC SOC2 scans with checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: ${{ inputs.CHECKOV_SCAN_DIRECTORY }}
+          framework: ${{ inputs.CHECKOV_SCAN_FRAMEWORK }}
+          quiet: ${{ inputs.CHECKOV_OUTPUT_ONLY_FAILING_CHECKS }}

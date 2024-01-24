@@ -43,6 +43,26 @@ on:
         type: boolean
         description: Run mypy
         required: false
+      RUN_CHECKOV_SCAN:
+        type: boolean
+        description: Run checkov IaC scans
+        default: false
+        required: false
+      CHECKOV_SCAN_DIRECTORY:
+        type: string
+        description: Directory to run IaC scan against
+        default: "."
+        required: false
+      CHECKOV_SCAN_FRAMEWORK:
+        type: string
+        description: Framework to use for checkov scans
+        default: "cloudformation"
+        required: false
+      CHECKOV_OUTPUT_ONLY_FAILING_CHECKS:
+        type: boolean
+        description: Controls whether the checkov scan only displays failing checks
+        default: true
+        required: false
 
 env:
   GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
@@ -117,3 +137,10 @@ jobs:
         if: ${{ steps.filter.outputs.changed_py == 'true' && inputs.ENABLE_BDD }}
         run: |
           behave ./bdd_tests/features/
+      - name: Run IaC SOC2 scans with checkov
+        if: ${{ inputs.RUN_CHECKOV_SCAN }}
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: ${{ inputs.CHECKOV_SCAN_DIRECTORY }}
+          framework: ${{ inputs.CHECKOV_SCAN_FRAMEWORK }}
+          quiet: ${{ inputs.CHECKOV_OUTPUT_ONLY_FAILING_CHECKS }}
