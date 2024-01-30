@@ -32,6 +32,10 @@ on:
         required: false
         default: template.yaml
         type: string
+      PYTHON_VERSION:
+        type: string
+        default: "3.8"
+        required: false
 
 permissions:
   id-token: write # This is required for requesting the JWT
@@ -44,10 +48,10 @@ jobs:
   deploy-dev:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.8"
+          python-version: ${{ inputs.PYTHON_VERSION }}
       - uses: aws-actions/setup-sam@v2
       - name: Configure AWS credentials for DEV
         uses: aws-actions/configure-aws-credentials@v1
