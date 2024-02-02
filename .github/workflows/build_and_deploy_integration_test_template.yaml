@@ -1,0 +1,82 @@
+name: Build and deploy SAM template
+
+on:
+  workflow_call:
+    secrets:
+      PAT_GITHUB:
+        required: true
+      AWS_OIDC_ROLE_ARN:
+        required: true
+    inputs:
+      TOML_CONFIG:
+        required: false
+        default: dev
+        type: string
+      TEMPLATE_NAME:
+        required: false
+        default: template.yaml
+        type: string
+      TOML_CONFIG_FILE:
+        required: false
+        default: samconfig.toml
+        type: string
+      PYTHON_VERSION:
+        type: string
+        default: "3.8"
+        required: false
+      SAM_STACK_NAME:
+        type: string
+        required: true
+      CLEANUP_STACK:
+        type: boolean
+        required: false
+        description: Cleanup Stack after Run
+        default: false
+
+
+permissions:
+  id-token: write # This is required for requesting the JWT
+  contents: read  # This is required for actions/checkout
+
+env:
+  GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.PYTHON_VERSION }}
+      - uses: aws-actions/setup-sam@v2
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          role-session-name: samplerolesession
+          aws-region: us-east-2
+      - name: Validate template
+        run: sam validate --template-file ${{ inputs.TEMPLATE_NAME }}
+      - name: Build SAM
+        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
+      - name: Deploy SAM template
+        run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset --stack-name ${{ inputs.SAM_STACK_NAME }}
+      - name: Get Deployed Step Function Details
+        run: |
+          {
+            echo 'STACK_INFO<<EOF'
+            (sam list stack-outputs --stack-name core-data-pipeline-integration-test --output json)
+            echo EOF
+          } >> "$GITHUB_ENV"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements_testing.txt ]; then pip install -r requirements_testing.txt; fi
+      - name: Run Integration Test
+        run: |
+          python -m integration_tests
+      - name: Delete SAM template
+        if: ${{ inputs.CLEANUP_STACK }}
+        run: sam delete --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.TOML_CONFIG }} --stack-name ${{ inputs.SAM_STACK_NAME }} --no-prompts
