@@ -27,6 +27,12 @@ on:
       SAM_STACK_NAME:
         type: string
         required: true
+      CLEANUP_STACK:
+        type: boolean
+        required: false
+        description: Cleanup Stack after Run
+        default: false
+
 
 permissions:
   id-token: write # This is required for requesting the JWT
@@ -72,4 +78,5 @@ jobs:
         run: |
           python -m integration_tests
       - name: Delete SAM template
+        if: ${{ inputs.CLEANUP_STACK }}
         run: sam delete --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.TOML_CONFIG }} --stack-name ${{ inputs.SAM_STACK_NAME }} --no-prompts
