@@ -134,6 +134,7 @@ jobs:
       - name: Django test
         if: ${{ steps.filter.outputs.changed_py == 'true' && inputs.ENABLE_DJANGO_TEST }}
         run: |
+          python manage.py migrate
           python manage.py test
       - name: Check test coverage
         if: ${{ steps.filter.outputs.changed_py == 'true' && inputs.ENABLE_COVERAGE }}
