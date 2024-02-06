@@ -62,6 +62,9 @@ on:
         type: boolean
         description: Controls whether the checkov scan only displays failing checks
         default: true
+      ENABLE_DJANGO_TEST:
+        type: boolean
+        description: Run Django application tests
         required: false
 
 env:
@@ -128,6 +131,11 @@ jobs:
         if: ${{ steps.filter.outputs.changed_py == 'true' && inputs.ENABLE_PYTEST }}
         run: |
           python -m pytest
+      - name: Django test
+        if: ${{ steps.filter.outputs.changed_py == 'true' && inputs.ENABLE_DJANGO_TEST }}
+        run: |
+          python manage.py migrate
+          python manage.py test
       - name: Check test coverage
         if: ${{ steps.filter.outputs.changed_py == 'true' && inputs.ENABLE_COVERAGE }}
         run: |
