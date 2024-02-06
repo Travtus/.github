@@ -43,7 +43,6 @@ on:
         type: boolean
         description: Run mypy
         required: false
-<<<<<<< Updated upstream
       RUN_CHECKOV_SCAN:
         type: boolean
         description: Run checkov IaC scans
@@ -63,11 +62,9 @@ on:
         type: boolean
         description: Controls whether the checkov scan only displays failing checks
         default: true
-=======
       ENABLE_DJANGO_TEST:
         type: boolean
         description: Run Django application tests
->>>>>>> Stashed changes
         required: false
 
 env:
