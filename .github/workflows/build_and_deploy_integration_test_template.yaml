@@ -107,7 +107,7 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add integration_tests/
+          git add integration_tests/integration_test_run_result.json
           git commit -m "Add integration test run result for future verification"
       - name: Push changes
         if: ${{ inputs.OVERWRITE_RESULT }}
