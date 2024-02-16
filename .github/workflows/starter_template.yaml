@@ -66,6 +66,11 @@ on:
         type: boolean
         description: Run Django application tests
         required: false
+      ENABLE_IMPORT_CHECK:
+        type: boolean
+        description: Run import check
+        default: true
+        required: false
 
 env:
   GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
@@ -111,7 +116,7 @@ jobs:
         if: ${{ steps.commit_changes.outputs.changes_detected == 'true' }}
         run: exit 1
       - name: Analysing the code with pylint
-        if: ${{ steps.filter.outputs.changed_py == 'true' }}
+        if: ${{ steps.filter.outputs.changed_py == 'true' && inputs.ENABLE_IMPORT_CHECK }}
         run: |
           # check for import errors
           pylint -d all -e E0401 **/*.py
