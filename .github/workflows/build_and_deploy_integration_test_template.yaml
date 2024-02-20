@@ -47,6 +47,10 @@ on:
         required: false
         description: overwrite integration Test result to Repo
         default: false
+      ARM_SUPPORT:
+        type: boolean
+        default: false
+        required: false
 
 
 permissions:
@@ -69,12 +73,17 @@ jobs:
         with:
           python-version: ${{ inputs.PYTHON_VERSION }}
       - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           role-session-name: samplerolesession
           aws-region: us-east-2
+      - name: Settings to support ARM Build
+        if: ${{ inputs.ARM_SUPPORT }}
+        run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
       - name: Validate template
         if: ${{ inputs.RUN_DEPLOY }}
         run: sam validate --template-file ${{ inputs.TEMPLATE_NAME }}
