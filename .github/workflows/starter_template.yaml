@@ -71,6 +71,10 @@ on:
         description: Run import check
         default: true
         required: false
+      ENABLE_POSTGRES_DB:
+        type: boolean
+        description: Enable postgres db for Testing
+        default: false
 
 env:
   GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
@@ -79,6 +83,18 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: ${{ (inputs.ENABLE_POSTGRES_DB) && 'postgres' || '' }}
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
     steps:
       - uses: actions/checkout@v4
         with:
