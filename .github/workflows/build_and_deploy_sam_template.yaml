@@ -69,7 +69,7 @@ jobs:
         if: ${{ inputs.ARM_SUPPORT }}
         run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
       - name: Validate template
-        run: sam validate
+        run: sam validate --template-file ${{ inputs.TEMPLATE_NAME }}
       - name: Build SAM
         run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
       - name: Deploy SAM template
@@ -95,7 +95,7 @@ jobs:
         if: ${{ inputs.ARM_SUPPORT }}
         run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
       - name: Validate template
-        run: sam validate
+        run: sam validate --template-file ${{ inputs.TEMPLATE_NAME }}
       - name: Build SAM
         run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
       - name: Deploy SAM template
@@ -121,7 +121,7 @@ jobs:
         if: ${{ inputs.ARM_SUPPORT }}
         run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
       - name: Validate template
-        run: sam validate
+        run: sam validate --template-file ${{ inputs.TEMPLATE_NAME }}
       - name: Build SAM
         run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
       - name: Deploy SAM template
