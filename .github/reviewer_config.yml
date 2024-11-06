@@ -24,6 +24,7 @@ files:
     - backend-team
 
 options:
+  enable_group_assignment: false
   ignore_draft: true
   ignored_keywords:
     - DO NOT REVIEW
