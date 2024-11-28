@@ -85,7 +85,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: ${{ (inputs.ENABLE_POSTGRES_DB) && 'postgres' || '' }}
+        image: ${{ (inputs.ENABLE_POSTGRES_DB) && 'ankane/pgvector' || '' }}
         env:
           POSTGRES_PASSWORD: postgres
         options: >-
