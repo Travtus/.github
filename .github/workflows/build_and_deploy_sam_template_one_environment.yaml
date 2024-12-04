@@ -60,10 +60,9 @@ jobs:
       - name: Upgrade pip
         run: python3 -m pip install --upgrade pip
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       - name: Validate template
         run: sam validate --template-file ${{ inputs.TEMPLATE_NAME }}
       - name: Build SAM
