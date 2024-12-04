@@ -57,6 +57,13 @@ jobs:
       - name: Settings to support ARM Build
         if: ${{ inputs.ARM_SUPPORT }}
         run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+      - name: Upgrade pip
+        run: python3 -m pip install --upgrade pip
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
       - name: Validate template
         run: sam validate --template-file ${{ inputs.TEMPLATE_NAME }}
       - name: Build SAM
