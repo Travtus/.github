@@ -69,8 +69,10 @@ jobs:
         run: sam validate --template-file ${{ inputs.TEMPLATE_NAME }}
       - name: Build SAM
         run: |
-          export export PATH="$HOME/.cargo/bin:$PATH"
-          echo "GITHUB_PATH=GITHUB_PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
+          echo "GITHUB_PATH=$GITHUB_PATH"
+          echo "PATH=$PATH"
+          cargo --version
           sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN --parameter-overrides GithubToken=$GITHUB_TOKEN
       - name: Deploy SAM template
         run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset
