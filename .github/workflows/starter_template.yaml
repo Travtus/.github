@@ -62,6 +62,10 @@ on:
         type: boolean
         description: Controls whether the checkov scan only displays failing checks
         default: true
+      CHECKOV_SKIP_CHECK:
+        type: string
+        description: skip a specific check_id. can be comma separated list
+        required: false
       ENABLE_DJANGO_TEST:
         type: boolean
         description: Run Django application tests
@@ -173,3 +177,4 @@ jobs:
           directory: ${{ inputs.CHECKOV_SCAN_DIRECTORY }}
           framework: ${{ inputs.CHECKOV_SCAN_FRAMEWORK }}
           quiet: ${{ inputs.CHECKOV_OUTPUT_ONLY_FAILING_CHECKS }}
+          skip_check: ${{ inputs.CHECKOV_SKIP_CHECK }}
