@@ -79,6 +79,10 @@ on:
         type: boolean
         description: Enable postgres db for Testing
         default: false
+      ENABLE_CLICKHOUSE_DB:
+        type: boolean
+        description: Enable clickhouse db for Testing
+        default: false
 
 env:
   GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
@@ -99,6 +103,19 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
+      clickhouse:
+        image: ${{ (inputs.ENABLE_CLICKHOUSE_DB) && 'clickhouse/clickhouse-server:25.2.2.39' || '' }}
+        options: >-
+          --health-cmd "wget --spider -q http://localhost:8123/ping || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 8123:8123
+          - 9000:9000
+        env:
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: mypassword
     steps:
       - uses: actions/checkout@v4
         with:
@@ -107,6 +124,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ inputs.PYTHON_VERSION }}
+      - name: Install clickhouse-client
+        if: ${{ inputs.ENABLE_CLICKHOUSE_DB }}
+        run: |
+          sudo apt update
+          sudo apt install -y clickhouse-client
       - name: Get file changes
         uses: dorny/paths-filter@v2
         id: filter
