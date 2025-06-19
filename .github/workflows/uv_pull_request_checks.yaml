@@ -1,0 +1,135 @@
+name: Pull request checks
+
+on:
+  workflow_call:
+    secrets:
+      PAT_GITHUB:
+        required: true
+    inputs:
+      PYTHON_VERSION:
+        type: string
+        default: 3.13
+        required: true
+      ENABLE_COVERAGE:
+        type: boolean
+        description: Run coverage.py against test files
+        default: false
+        required: false
+      COVERAGE_THRESHOLD:
+        type: number
+        description: Test coverage for the repository
+        default: 100
+        required: false
+      RUN_CHECKOV_SCAN:
+        type: boolean
+        description: Run checkov IaC scans
+        default: false
+        required: false
+      CHECKOV_SCAN_DIRECTORY:
+        type: string
+        description: Directory to run IaC scan against
+        default: "."
+        required: false
+      CHECKOV_SCAN_FRAMEWORK:
+        type: string
+        description: Framework to use for checkov scans
+        default: "cloudformation"
+        required: false
+      CHECKOV_OUTPUT_ONLY_FAILING_CHECKS:
+        type: boolean
+        description: Controls whether the checkov scan only displays failing checks
+        default: true
+      CHECKOV_SKIP_CHECK:
+        type: string
+        description: skip a specific check_id. can be comma separated list
+        required: false
+      ENABLE_POSTGRES_DB:
+        type: boolean
+        description: Enable postgres db for Testing
+        default: false
+      ENABLE_CLICKHOUSE_DB:
+        type: boolean
+        description: Enable clickhouse db for Testing
+        default: false
+
+env:
+  GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
+  PY_GLOB: "./**/*.py"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: ${{ (inputs.ENABLE_POSTGRES_DB) && 'ankane/pgvector' || '' }}
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      clickhouse:
+        image: ${{ (inputs.ENABLE_CLICKHOUSE_DB) && 'clickhouse/clickhouse-server:25.2.2.39' || '' }}
+        options: >-
+          --health-cmd "wget --spider -q http://localhost:8123/ping || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 8123:8123
+          - 9000:9000
+        env:
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: mypassword
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ env.GITHUB_TOKEN }}
+      - name: Set up Python ${{ inputs.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.PYTHON_VERSION }}
+      - name: Install clickhouse-client
+        if: ${{ inputs.ENABLE_CLICKHOUSE_DB }}
+        run: |
+          sudo apt update
+          sudo apt install -y clickhouse-client
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Install deps via UV
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
+        run: |
+          uv sync
+      - name: Format code
+        run: uv run task format
+      - name: Commit changes
+        id: commit_changes
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_message: Format changed files
+      - name: Check if commit
+        if: ${{ steps.commit_changes.outputs.changes_detected == 'true' }}
+        run: exit 1
+      - name: Run ruff
+        run: uv run task ruff
+      - name: Run MyPy
+        run: uv run task mypy
+      - name: Run pytest
+        run: uv run task tests
+      - name: Check test coverage
+        if: ${{ inputs.ENABLE_COVERAGE }}
+        run: |
+            uv run coverage run -m pytest
+            uv run coverage report --fail-under=${{ inputs.COVERAGE_THRESHOLD }}
+      - name: Run IaC SOC2 scans with checkov
+        if: ${{ inputs.RUN_CHECKOV_SCAN }}
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: ${{ inputs.CHECKOV_SCAN_DIRECTORY }}
+          framework: ${{ inputs.CHECKOV_SCAN_FRAMEWORK }}
+          quiet: ${{ inputs.CHECKOV_OUTPUT_ONLY_FAILING_CHECKS }}
+          skip_check: ${{ inputs.CHECKOV_SKIP_CHECK }}
