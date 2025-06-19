@@ -123,8 +123,8 @@ jobs:
       - name: Check test coverage
         if: ${{ inputs.ENABLE_COVERAGE }}
         run: |
-            coverage run -m pytest
-            coverage report --fail-under=${{ inputs.COVERAGE_THRESHOLD }}
+            uv run coverage run -m pytest
+            uv run coverage report --fail-under=${{ inputs.COVERAGE_THRESHOLD }}
       - name: Run IaC SOC2 scans with checkov
         if: ${{ inputs.RUN_CHECKOV_SCAN }}
         uses: bridgecrewio/checkov-action@master
