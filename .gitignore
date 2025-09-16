@@ -38,6 +38,10 @@ pip-log.txt
 pip-delete-this-directory.txt
 
 # Unit test / coverage reports
+*test*/
+*test*.json
+*test*.log
+*test*.txt
 htmlcov/
 .tox/
 .nox/
@@ -140,5 +144,18 @@ venv/**
 log.out
 
 *.aws-sam
+.aws-sam/
+
+# Large files and sample data
+*sample*.json
+
+# Temporary files
+*.tmp
+*.temp
+
+# Backup files
+*.bak
+*.backup
+*~
 
 *.local.*
