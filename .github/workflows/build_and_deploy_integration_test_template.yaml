@@ -51,6 +51,10 @@ on:
         type: boolean
         default: false
         required: false
+      IMAGE_REPOSITORIES:
+        type: string
+        required: false
+        description: 'Image repositories mapping (e.g., StepExecutor=account.dkr.ecr.region.amazonaws.com/repo:tag)'
 
 
 permissions:
@@ -89,10 +93,13 @@ jobs:
         run: sam validate --template-file ${{ inputs.TEMPLATE_NAME }}
       - name: Build SAM
         if: ${{ inputs.RUN_DEPLOY }}
-        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
-      - name: Deploy SAM template
-        if: ${{ inputs.RUN_DEPLOY }}
-        run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset --stack-name ${{ inputs.SAM_STACK_NAME }}
+        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN --parameter-overrides GithubToken=$GITHUB_TOKEN
+      - name: Deploy SAM template (with image repositories)
+        if: ${{ inputs.RUN_DEPLOY && inputs.IMAGE_REPOSITORIES }}
+        run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset --stack-name ${{ inputs.SAM_STACK_NAME }} --parameter-overrides GithubToken=$GITHUB_TOKEN --image-repositories ${{ inputs.IMAGE_REPOSITORIES }}
+      - name: Deploy SAM template (without image repositories)
+        if: ${{ inputs.RUN_DEPLOY && !inputs.IMAGE_REPOSITORIES }}
+        run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset --stack-name ${{ inputs.SAM_STACK_NAME }} --parameter-overrides GithubToken=$GITHUB_TOKEN
       - name: Get Deployed Step Function Details
         run: |
           {
