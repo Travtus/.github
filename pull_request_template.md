@@ -8,6 +8,9 @@
 - describe the new product behaviour in *present tense*, and the old behaviour and how it's been changed in *past tense*.
 - Use the *Royal We*: *"We"* made changes, not *"I"* made changes. }
 
+## Related Tickets & Documents
+- incorporate any relevant user stories, tickets, or documentation that this PR is intended to address.
+
 ## What are the changes implemented in this PR?
 
 { Please explain what you implemented, why your changes are the best way to achieve the goal(s) above. Please describe every method, class and package, by explaining:
