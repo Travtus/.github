@@ -14,7 +14,7 @@ jobs:
         run: |
           curl -H "Authorization: token ${{ secrets.GH_TOKEN }}" https://raw.githubusercontent.com/Travtus/.github/main/.github/reviewer_config.yml > reviewer_config.yml
       - name: Request review based on files changes
-        uses: necojackarc/auto-request-review@v0.12.0
+        uses: necojackarc/auto-request-review@v0.13.0
         with:
           token: ${{ secrets.GH_TOKEN }}
           config: reviewer_config.yml

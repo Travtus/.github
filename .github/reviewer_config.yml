@@ -2,19 +2,15 @@ reviewers:
   defaults:
     - team:backend
     - team:frontend
-    - team:data-science
 
   groups:
     backend-team:
       - team:backend
     frontend-team:
       - team:frontend
-    data-science-team:
-      - team:data-science
 
 files:
   '**/*.py':
-    - data-science-team
     - backend-team
   '**/*.js':
     - frontend-team
