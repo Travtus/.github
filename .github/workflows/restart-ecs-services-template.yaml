@@ -1,0 +1,94 @@
+name: Restart ECS Services
+
+on:
+  workflow_call:
+    inputs:
+      ECS_CLUSTER_NAME:
+        type: string
+        required: false
+        default: ""
+        description: "ECS cluster name to restart services in"
+      AWS_REGION:
+        type: string
+        default: "us-east-2"
+        required: false
+        description: "AWS region for ECS operations"
+    secrets:
+      AWS_OIDC_ROLE_ARN:
+        required: true
+        description: "AWS OIDC role ARN for authentication"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  restart-ecs-services:
+    name: Restart ECS services
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip if cluster name not provided
+        if: ${{ inputs.ECS_CLUSTER_NAME == '' }}
+        run: |
+          echo "ECS_CLUSTER_NAME not provided - skipping ECS service restart"
+          exit 0
+
+      - name: Configure AWS credentials
+        if: ${{ inputs.ECS_CLUSTER_NAME != '' }}
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          role-session-name: samplerolesession
+          aws-region: ${{ inputs.AWS_REGION }}
+
+      - name: Restart all ECS services in cluster
+        if: ${{ inputs.ECS_CLUSTER_NAME != '' }}
+        run: |
+          CLUSTER_NAME="${{ inputs.ECS_CLUSTER_NAME }}"
+          REGION="${{ inputs.AWS_REGION }}"
+          
+          echo "Finding all services in cluster: ${CLUSTER_NAME}"
+          
+          # List all services in the cluster
+          SERVICES=$(aws ecs list-services \
+            --cluster ${CLUSTER_NAME} \
+            --region ${REGION} \
+            --query 'serviceArns[*]' \
+            --output text)
+          
+          if [ -z "$SERVICES" ]; then
+            echo "No services found in cluster ${CLUSTER_NAME}"
+            exit 0
+          fi
+          
+          # Restart each service
+          for SERVICE_ARN in $SERVICES; do
+            SERVICE_NAME=$(echo $SERVICE_ARN | awk -F'/' '{print $NF}')
+          
+            # Check if deployment is already in progress
+            DEPLOYMENT_STATUS=$(aws ecs describe-services \
+              --cluster ${CLUSTER_NAME} \
+              --services ${SERVICE_NAME} \
+              --region ${REGION} \
+              --query 'services[0].deployments[?status==`PRIMARY`].rolloutState' \
+              --output text)
+          
+            if [ "$DEPLOYMENT_STATUS" == "IN_PROGRESS" ]; then
+              echo "Service ${SERVICE_NAME} already has a deployment in progress - skipping force restart"
+              echo "The new image will be picked up by the current deployment"
+            else
+              echo "Forcing new deployment for service: ${SERVICE_NAME}"
+          
+              aws ecs update-service \
+                --cluster ${CLUSTER_NAME} \
+                --service ${SERVICE_NAME} \
+                --force-new-deployment \
+                --region ${REGION} \
+                --no-cli-pager > /dev/null
+          
+              echo "Service ${SERVICE_NAME} deployment initiated"
+            fi
+          done
+          
+          echo ""
+          echo "All services in cluster ${CLUSTER_NAME} processed"
