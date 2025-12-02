@@ -29,6 +29,16 @@ on:
         required: false
         default: samconfig.toml
         type: string
+      RESTART_ECS_SERVICES:
+        type: boolean
+        default: true
+        required: false
+        description: "Whether to force restart ECS services after deployment"
+      ECS_CLUSTER_NAME:
+        type: string
+        default: ""
+        required: false
+        description: "ECS cluster name to restart services in (required if RESTART_ECS_SERVICES is true)"
 
 
 jobs:
@@ -43,7 +53,7 @@ jobs:
       ECR_REPO_NAME: ${{ inputs.ECR_REPO_NAME }}
   build-and-deploy-sam-template:
     needs: build-and-deploy-docker-image
-    uses: Travtus/.github/.github/workflows/build_and_deploy_sam_template_one_environment.yaml@main
+    uses: Travtus/.github/.github/workflows/build_and_deploy_sam_template_one_environment.yaml@${{ github.ref_name }}
     secrets:
       PAT_GITHUB: ${{ secrets.PAT_GITHUB }}
       AWS_OIDC_ROLE_ARN: ${{ secrets.AWS_OIDC_ROLE_ARN }}
@@ -51,3 +61,6 @@ jobs:
       TOML_CONFIG: ${{ inputs.TOML_CONFIG }}
       TEMPLATE_NAME: ${{ inputs.TEMPLATE_NAME }}
       TOML_CONFIG_FILE: ${{ inputs.TOML_CONFIG_FILE }}
+      RESTART_ECS_SERVICES: ${{ inputs.RESTART_ECS_SERVICES }}
+      ECS_CLUSTER_NAME: ${{ inputs.ECS_CLUSTER_NAME }}
+      AWS_REGION: ${{ inputs.AWS_REGION }}

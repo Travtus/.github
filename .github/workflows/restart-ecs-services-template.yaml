@@ -28,21 +28,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Skip if cluster name not provided
-        if: ${{ inputs.ECS_CLUSTER_NAME == '' }}
+        if: inputs.ECS_CLUSTER_NAME == ''
         run: |
           echo "ECS_CLUSTER_NAME not provided - skipping ECS service restart"
           exit 0
 
       - name: Configure AWS credentials
-        if: ${{ inputs.ECS_CLUSTER_NAME != '' }}
-        uses: aws-actions/configure-aws-credentials@v4
+        if: inputs.ECS_CLUSTER_NAME != ''
+        uses: aws-actions/configure-aws-credentials@v1
         with:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           role-session-name: samplerolesession
           aws-region: ${{ inputs.AWS_REGION }}
 
       - name: Restart all ECS services in cluster
-        if: ${{ inputs.ECS_CLUSTER_NAME != '' }}
+        if: inputs.ECS_CLUSTER_NAME != ''
         run: |
           set -e
           CLUSTER_NAME="${{ inputs.ECS_CLUSTER_NAME }}"
@@ -50,46 +50,55 @@ jobs:
           
           echo "Finding all services in cluster: ${CLUSTER_NAME}"
           
-          # List all services in the cluster
-          SERVICES=$(aws ecs list-services \
-            --cluster ${CLUSTER_NAME} \
-            --region ${REGION} \
-            --query 'serviceArns[*]' \
-            --output text)
+          mapfile -t SERVICES < <(aws ecs list-services \
+            --cluster "${CLUSTER_NAME}" \
+            --region "${REGION}" \
+            --query 'serviceArns[]' \
+            --output text | tr '\t' '\n')
           
-          if [ -z "$SERVICES" ]; then
+          if [ ${#SERVICES[@]} -eq 0 ]; then
             echo "No services found in cluster ${CLUSTER_NAME}"
             exit 0
           fi
           
-          # Restart each service
-          for SERVICE_ARN in $SERVICES; do
-            SERVICE_NAME=$(echo "$SERVICE_ARN" | awk -F'/' '{print $NF}')
+          SERVICES_TO_WAIT=()
           
-            # Check if deployment is already in progress
+          for SERVICE_ARN in "${SERVICES[@]}"; do
+            SERVICE_NAME=$(echo "${SERVICE_ARN}" | awk -F'/' '{print $NF}')
+          
             DEPLOYMENT_STATUS=$(aws ecs describe-services \
-              --cluster ${CLUSTER_NAME} \
-              --services ${SERVICE_NAME} \
-              --region ${REGION} \
+              --cluster "${CLUSTER_NAME}" \
+              --services "${SERVICE_NAME}" \
+              --region "${REGION}" \
               --query 'services[0].deployments[?status==`PRIMARY`].rolloutState' \
               --output text)
           
-            if [ "$DEPLOYMENT_STATUS" = "IN_PROGRESS" ]; then
-              echo "Service ${SERVICE_NAME} already has a deployment in progress - skipping force restart"
-              echo "The new image will be picked up by the current deployment"
+            if [ "$DEPLOYMENT_STATUS" == "IN_PROGRESS" ]; then
+              echo "Service ${SERVICE_NAME} already has a deployment in progress"
+              SERVICES_TO_WAIT+=("${SERVICE_NAME}")
             else
               echo "Forcing new deployment for service: ${SERVICE_NAME}"
-          
               aws ecs update-service \
-                --cluster ${CLUSTER_NAME} \
-                --service ${SERVICE_NAME} \
+                --cluster "${CLUSTER_NAME}" \
+                --service "${SERVICE_NAME}" \
                 --force-new-deployment \
-                --region ${REGION} \
+                --region "${REGION}" \
                 --no-cli-pager > /dev/null
-          
-              echo "Service ${SERVICE_NAME} deployment initiated"
+              SERVICES_TO_WAIT+=("${SERVICE_NAME}")
             fi
           done
           
           echo ""
-          echo "All services in cluster ${CLUSTER_NAME} processed"
+          echo "Waiting for all service deployments to complete..."
+          
+          for SERVICE_NAME in "${SERVICES_TO_WAIT[@]}"; do
+            echo "Waiting for ${SERVICE_NAME} to become stable..."
+            aws ecs wait services-stable \
+              --cluster "${CLUSTER_NAME}" \
+              --services "${SERVICE_NAME}" \
+              --region "${REGION}"
+            echo "✓ ${SERVICE_NAME} is stable"
+          done
+          
+          echo ""
+          echo "All services in cluster ${CLUSTER_NAME} are stable"
