@@ -35,7 +35,7 @@ jobs:
 
       - name: Configure AWS credentials
         if: ${{ inputs.ECS_CLUSTER_NAME != '' }}
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           role-session-name: samplerolesession
@@ -44,6 +44,7 @@ jobs:
       - name: Restart all ECS services in cluster
         if: ${{ inputs.ECS_CLUSTER_NAME != '' }}
         run: |
+          set -e
           CLUSTER_NAME="${{ inputs.ECS_CLUSTER_NAME }}"
           REGION="${{ inputs.AWS_REGION }}"
           
@@ -63,7 +64,7 @@ jobs:
           
           # Restart each service
           for SERVICE_ARN in $SERVICES; do
-            SERVICE_NAME=$(echo $SERVICE_ARN | awk -F'/' '{print $NF}')
+            SERVICE_NAME=$(echo "$SERVICE_ARN" | awk -F'/' '{print $NF}')
           
             # Check if deployment is already in progress
             DEPLOYMENT_STATUS=$(aws ecs describe-services \
@@ -73,7 +74,7 @@ jobs:
               --query 'services[0].deployments[?status==`PRIMARY`].rolloutState' \
               --output text)
           
-            if [ "$DEPLOYMENT_STATUS" == "IN_PROGRESS" ]; then
+            if [ "$DEPLOYMENT_STATUS" = "IN_PROGRESS" ]; then
               echo "Service ${SERVICE_NAME} already has a deployment in progress - skipping force restart"
               echo "The new image will be picked up by the current deployment"
             else
