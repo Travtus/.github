@@ -35,7 +35,7 @@ jobs:
 
       - name: Configure AWS credentials
         if: inputs.ECS_CLUSTER_NAME != ''
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           role-session-name: samplerolesession
