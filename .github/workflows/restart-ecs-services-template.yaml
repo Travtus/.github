@@ -1,0 +1,105 @@
+name: Restart ECS Services
+
+on:
+  workflow_call:
+    inputs:
+      ECS_CLUSTER_NAME:
+        type: string
+        required: false
+        default: ""
+        description: "ECS cluster name to restart services in"
+      AWS_REGION:
+        type: string
+        default: "us-east-2"
+        required: false
+        description: "AWS region for ECS operations"
+    secrets:
+      AWS_OIDC_ROLE_ARN:
+        required: true
+        description: "AWS OIDC role ARN for authentication"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  restart-ecs-services:
+    name: Restart ECS services
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip if cluster name not provided
+        if: inputs.ECS_CLUSTER_NAME == ''
+        run: |
+          echo "ECS_CLUSTER_NAME not provided - skipping ECS service restart"
+          exit 0
+
+      - name: Configure AWS credentials
+        if: inputs.ECS_CLUSTER_NAME != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          role-session-name: samplerolesession
+          aws-region: ${{ inputs.AWS_REGION }}
+
+      - name: Restart all ECS services in cluster
+        if: inputs.ECS_CLUSTER_NAME != ''
+        run: |
+          set -e
+          CLUSTER_NAME="${{ inputs.ECS_CLUSTER_NAME }}"
+          REGION="${{ inputs.AWS_REGION }}"
+          
+          echo "Finding all services in cluster: ${CLUSTER_NAME}"
+          
+          mapfile -t SERVICES < <(aws ecs list-services \
+            --cluster "${CLUSTER_NAME}" \
+            --region "${REGION}" \
+            --query 'serviceArns[]' \
+            --output text | tr '\t' '\n')
+          
+          if [ ${#SERVICES[@]} -eq 0 ]; then
+            echo "No services found in cluster ${CLUSTER_NAME}"
+            exit 0
+          fi
+          
+          SERVICES_TO_WAIT=()
+          
+          for SERVICE_ARN in "${SERVICES[@]}"; do
+            SERVICE_NAME=$(echo "${SERVICE_ARN}" | awk -F'/' '{print $NF}')
+          
+            DEPLOYMENT_STATUS=$(aws ecs describe-services \
+              --cluster "${CLUSTER_NAME}" \
+              --services "${SERVICE_NAME}" \
+              --region "${REGION}" \
+              --query 'services[0].deployments[?status==`PRIMARY`].rolloutState' \
+              --output text)
+          
+            if [ "$DEPLOYMENT_STATUS" == "IN_PROGRESS" ]; then
+              echo "Service ${SERVICE_NAME} already has a deployment in progress"
+              SERVICES_TO_WAIT+=("${SERVICE_NAME}")
+            else
+              echo "Forcing new deployment for service: ${SERVICE_NAME}"
+              aws ecs update-service \
+                --cluster "${CLUSTER_NAME}" \
+                --service "${SERVICE_NAME}" \
+                --force-new-deployment \
+                --region "${REGION}" \
+                --no-cli-pager > /dev/null
+              SERVICES_TO_WAIT+=("${SERVICE_NAME}")
+            fi
+          done
+          
+          echo ""
+          echo "Waiting for all service deployments to complete (5 min timeout per service)..."
+          
+          for SERVICE_NAME in "${SERVICES_TO_WAIT[@]}"; do
+            echo "Waiting for ${SERVICE_NAME} to become stable..."
+            timeout 300 aws ecs wait services-stable \
+              --cluster "${CLUSTER_NAME}" \
+              --services "${SERVICE_NAME}" \
+              --region "${REGION}" &
+          done
+          
+          wait
+          
+          echo ""
+          echo "All services in cluster ${CLUSTER_NAME} are stable"
