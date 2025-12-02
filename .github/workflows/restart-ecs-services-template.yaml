@@ -89,16 +89,17 @@ jobs:
           done
           
           echo ""
-          echo "Waiting for all service deployments to complete..."
+          echo "Waiting for all service deployments to complete (5 min timeout per service)..."
           
           for SERVICE_NAME in "${SERVICES_TO_WAIT[@]}"; do
             echo "Waiting for ${SERVICE_NAME} to become stable..."
-            aws ecs wait services-stable \
+            timeout 300 aws ecs wait services-stable \
               --cluster "${CLUSTER_NAME}" \
               --services "${SERVICE_NAME}" \
-              --region "${REGION}"
-            echo "✓ ${SERVICE_NAME} is stable"
+              --region "${REGION}" &
           done
+          
+          wait
           
           echo ""
           echo "All services in cluster ${CLUSTER_NAME} are stable"
