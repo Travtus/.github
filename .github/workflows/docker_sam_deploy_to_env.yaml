@@ -61,6 +61,14 @@ jobs:
       TOML_CONFIG: ${{ inputs.TOML_CONFIG }}
       TEMPLATE_NAME: ${{ inputs.TEMPLATE_NAME }}
       TOML_CONFIG_FILE: ${{ inputs.TOML_CONFIG_FILE }}
-      RESTART_ECS_SERVICES: ${{ inputs.RESTART_ECS_SERVICES }}
+  
+  ecs-services-restart:
+    name: Restart ECS services
+    if: ${{ inputs.RESTART_ECS_SERVICES }}
+    needs: build-and-deploy-sam-template
+    uses: ./.github/workflows/restart-ecs-services-template.yaml
+    secrets:
+      AWS_OIDC_ROLE_ARN: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+    with:
       ECS_CLUSTER_NAME: ${{ inputs.ECS_CLUSTER_NAME }}
       AWS_REGION: ${{ inputs.AWS_REGION }}
