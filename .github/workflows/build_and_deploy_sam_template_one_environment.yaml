@@ -28,21 +28,6 @@ on:
         type: boolean
         default: false
         required: false
-      RESTART_ECS_SERVICES:
-        type: boolean
-        default: false
-        required: false
-        description: "Whether to force restart ECS services after deployment"
-      ECS_CLUSTER_NAME:
-        type: string
-        default: ""
-        required: false
-        description: "ECS cluster name to restart services in (required if RESTART_ECS_SERVICES is true)"
-      AWS_REGION:
-        type: string
-        default: "us-east-2"
-        required: false
-        description: "AWS region for ECS operations"
 
 
 permissions:
@@ -78,14 +63,3 @@ jobs:
         run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN --parameter-overrides GithubToken=$GITHUB_TOKEN
       - name: Deploy SAM template
         run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset
-
-  restart-ecs-services:
-    name: Restart ECS services
-    needs: build-and-deploy
-    if: ${{ inputs.RESTART_ECS_SERVICES == true }}
-    uses: ./.github/workflows/restart-ecs-services-template.yaml
-    secrets:
-      AWS_OIDC_ROLE_ARN: ${{ secrets.AWS_OIDC_ROLE_ARN }}
-    with:
-      ECS_CLUSTER_NAME: ${{ inputs.ECS_CLUSTER_NAME }}
-      AWS_REGION: ${{ inputs.AWS_REGION }}
