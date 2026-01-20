@@ -41,6 +41,7 @@ on:
         default: false
         required: false
 
+
 permissions:
   id-token: write # This is required for requesting the JWT
   contents: read  # This is required for actions/checkout
@@ -76,10 +77,11 @@ jobs:
         run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.DEV_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset --parameter-overrides GithubToken=$GITHUB_TOKEN --resolve-image-repos
   deploy-qa:
     runs-on: ubuntu-latest
-    needs: deploy-dev
+    needs: [deploy-dev]
+    if: ${{ needs.deploy-dev.result == 'success' }}
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ inputs.PYTHON_VERSION }}
       - uses: aws-actions/setup-sam@v2
@@ -102,10 +104,11 @@ jobs:
         run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.QA_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset --parameter-overrides GithubToken=$GITHUB_TOKEN --resolve-image-repos
   deploy-uat:
     runs-on: ubuntu-latest
-    needs: deploy-qa
+    needs: [deploy-qa]
+    if: ${{ needs.deploy-qa.result == 'success' }}
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ inputs.PYTHON_VERSION }}
       - uses: aws-actions/setup-sam@v2

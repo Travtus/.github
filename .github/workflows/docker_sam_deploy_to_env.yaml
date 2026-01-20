@@ -29,6 +29,16 @@ on:
         required: false
         default: samconfig.toml
         type: string
+      RESTART_ECS_SERVICES:
+        type: boolean
+        default: true
+        required: false
+        description: "Whether to force restart ECS services after deployment"
+      ECS_CLUSTER_NAME:
+        type: string
+        default: ""
+        required: false
+        description: "ECS cluster name to restart services in (required if RESTART_ECS_SERVICES is true)"
 
 
 jobs:
@@ -51,3 +61,14 @@ jobs:
       TOML_CONFIG: ${{ inputs.TOML_CONFIG }}
       TEMPLATE_NAME: ${{ inputs.TEMPLATE_NAME }}
       TOML_CONFIG_FILE: ${{ inputs.TOML_CONFIG_FILE }}
+  
+  ecs-services-restart:
+    name: Restart ECS services
+    if: ${{ inputs.RESTART_ECS_SERVICES }}
+    needs: build-and-deploy-sam-template
+    uses: ./.github/workflows/restart-ecs-services-template.yaml
+    secrets:
+      AWS_OIDC_ROLE_ARN: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+    with:
+      ECS_CLUSTER_NAME: ${{ inputs.ECS_CLUSTER_NAME }}
+      AWS_REGION: ${{ inputs.AWS_REGION }}

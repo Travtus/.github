@@ -48,9 +48,8 @@ jobs:
       - uses: aws-actions/setup-sam@v2
         with:
           use-installer: true
-          version: 1.141.0
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           role-session-name: samplerolesession
