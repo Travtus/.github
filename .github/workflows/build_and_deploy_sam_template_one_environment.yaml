@@ -62,17 +62,24 @@ jobs:
       - name: Extract parameter overrides from samconfig.toml
         id: params
         run: |
-          PARAMS=$(python3 - <<'PY'
-          import tomllib
-          try:
-              cfg = tomllib.load(open("${{ inputs.TOML_CONFIG_FILE }}", "rb"))
-              env = cfg.get("${{ inputs.TOML_CONFIG }}", {}).get("deploy", {}).get("parameters", {})
-              overrides = env.get("parameter_overrides", "")
-              print(overrides.strip() if overrides else "")
-          except Exception:
-              print("")
-          PY
-          )
+          CONFIG_FILE="${{ inputs.TOML_CONFIG_FILE }}"
+          CONFIG_ENV="${{ inputs.TOML_CONFIG }}"
+          
+          # Extract parameter_overrides from the correct environment section
+          PARAMS=$(awk -v env="$CONFIG_ENV" '
+            BEGIN { in_env=0; in_deploy=0; in_params=0 }
+            /^\[/ { in_env=0; in_deploy=0; in_params=0 }
+            $0 ~ "^\\[" env "\\]" { in_env=1; next }
+            $0 ~ "^\\[" env "\\.deploy\\]" { in_env=1; in_deploy=1; next }
+            $0 ~ "^\\[" env "\\.deploy\\.parameters\\]" { in_env=1; in_deploy=1; in_params=1; next }
+            in_params && /^parameter_overrides/ {
+              sub(/^parameter_overrides[[:space:]]*=[[:space:]]*"?/, "")
+              sub(/"?[[:space:]]*$/, "")
+              print
+              exit
+            }
+          ' "$CONFIG_FILE" 2>/dev/null || echo "")
+          
           echo "PARAM_OVERRIDES=$PARAMS" >> $GITHUB_OUTPUT
       - name: Build SAM
         run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN --parameter-overrides GithubToken=$GITHUB_TOKEN
