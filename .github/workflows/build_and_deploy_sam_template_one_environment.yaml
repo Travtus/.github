@@ -59,7 +59,22 @@ jobs:
         run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
       - name: Validate template
         run: sam validate --template-file ${{ inputs.TEMPLATE_NAME }}
+      - name: Extract parameter overrides from samconfig.toml
+        id: params
+        run: |
+          PARAMS=$(python3 - <<'PY'
+          import tomllib
+          try:
+              cfg = tomllib.load(open("${{ inputs.TOML_CONFIG_FILE }}", "rb"))
+              env = cfg.get("${{ inputs.TOML_CONFIG }}", {}).get("deploy", {}).get("parameters", {})
+              overrides = env.get("parameter_overrides", "")
+              print(overrides.strip() if overrides else "")
+          except Exception:
+              print("")
+          PY
+          )
+          echo "PARAM_OVERRIDES=$PARAMS" >> $GITHUB_OUTPUT
       - name: Build SAM
         run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN --parameter-overrides GithubToken=$GITHUB_TOKEN
       - name: Deploy SAM template
-        run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset --parameter-overrides GithubToken=$GITHUB_TOKEN --resolve-image-repos
+        run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset --parameter-overrides "${{ steps.params.outputs.PARAM_OVERRIDES }} GithubToken=$GITHUB_TOKEN" --resolve-image-repos
