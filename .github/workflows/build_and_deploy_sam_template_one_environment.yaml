@@ -60,6 +60,6 @@ jobs:
       - name: Validate template
         run: sam validate --template-file ${{ inputs.TEMPLATE_NAME }}
       - name: Build SAM
-        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN --parameter-overrides GithubToken=$GITHUB_TOKEN
+        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
       - name: Deploy SAM template
-        run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset --parameter-overrides GithubToken=$GITHUB_TOKEN --resolve-image-repos
+        run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset --resolve-image-repos
