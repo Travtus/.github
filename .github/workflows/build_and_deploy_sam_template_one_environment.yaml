@@ -66,17 +66,45 @@ jobs:
           CONFIG_ENV="${{ inputs.TOML_CONFIG }}"
           
           # Extract parameter_overrides from the correct environment section
+          # Handles both single-line and multi-line (triple-quoted) TOML strings
           PARAMS=$(awk -v env="$CONFIG_ENV" '
-            BEGIN { in_env=0; in_deploy=0; in_params=0 }
-            /^\[/ { in_env=0; in_deploy=0; in_params=0 }
-            $0 ~ "^\\[" env "\\]" { in_env=1; next }
-            $0 ~ "^\\[" env "\\.deploy\\]" { in_env=1; in_deploy=1; next }
-            $0 ~ "^\\[" env "\\.deploy\\.parameters\\]" { in_env=1; in_deploy=1; in_params=1; next }
-            in_params && /^parameter_overrides/ {
-              sub(/^parameter_overrides[[:space:]]*=[[:space:]]*"?/, "")
-              sub(/"?[[:space:]]*$/, "")
-              print
-              exit
+            BEGIN { in_section=0; in_multiline=0; result="" }
+            /^\[/ { 
+              if (in_section && !in_multiline) exit
+              in_section=0 
+            }
+            $0 ~ "^\\[" env "\\.deploy\\.parameters\\]" { in_section=1; next }
+            in_section && /^parameter_overrides[[:space:]]*=/ {
+              line=$0
+              sub(/^parameter_overrides[[:space:]]*=[[:space:]]*/, "", line)
+              if (line ~ /^"""/) {
+                in_multiline=1
+                sub(/^"""/, "", line)
+                if (line ~ /"""$/) {
+                  sub(/"""$/, "", line)
+                  result=line
+                  exit
+                }
+                result=line
+              } else {
+                gsub(/^"|"$/, "", line)
+                result=line
+                exit
+              }
+              next
+            }
+            in_multiline {
+              if (/"""/) {
+                sub(/""".*/, "")
+                result=result " " $0
+                exit
+              }
+              result=result " " $0
+            }
+            END { 
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", result)
+              gsub(/[[:space:]]+/, " ", result)
+              print result 
             }
           ' "$CONFIG_FILE" 2>/dev/null || echo "")
           
