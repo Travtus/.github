@@ -70,13 +70,8 @@ jobs:
         run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
       - name: Validate template
         run: sam validate --template-file ${{ inputs.TEMPLATE_NAME }}
-      - name: Inject GithubToken into samconfig (if present)
-        run: |
-          if grep -q 'GithubToken="\$GITHUB_TOKEN"' "${{ inputs.TOML_CONFIG_FILE }}"; then
-            sed -i "s|GithubToken=\"\$GITHUB_TOKEN\"|GithubToken=\"${GITHUB_TOKEN}\"|g" "${{ inputs.TOML_CONFIG_FILE }}"
-          fi
       - name: Build SAM
-        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.DEV_TOML_CONFIG }} --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
+        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN --parameter-overrides GithubToken=$GITHUB_TOKEN
       - name: Deploy SAM template
         run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.DEV_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset --resolve-image-repos
   deploy-qa:
@@ -102,13 +97,8 @@ jobs:
         run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
       - name: Validate template
         run: sam validate --template-file ${{ inputs.TEMPLATE_NAME }}
-      - name: Inject GithubToken into samconfig (if present)
-        run: |
-          if grep -q 'GithubToken="\$GITHUB_TOKEN"' "${{ inputs.TOML_CONFIG_FILE }}"; then
-            sed -i "s|GithubToken=\"\$GITHUB_TOKEN\"|GithubToken=\"${GITHUB_TOKEN}\"|g" "${{ inputs.TOML_CONFIG_FILE }}"
-          fi
       - name: Build SAM
-        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.QA_TOML_CONFIG }} --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
+        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN --parameter-overrides GithubToken=$GITHUB_TOKEN
       - name: Deploy SAM template
         run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.QA_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset --resolve-image-repos
   deploy-uat:
@@ -134,12 +124,7 @@ jobs:
         run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
       - name: Validate template
         run: sam validate --template-file ${{ inputs.TEMPLATE_NAME }}
-      - name: Inject GithubToken into samconfig (if present)
-        run: |
-          if grep -q 'GithubToken="\$GITHUB_TOKEN"' "${{ inputs.TOML_CONFIG_FILE }}"; then
-            sed -i "s|GithubToken=\"\$GITHUB_TOKEN\"|GithubToken=\"${GITHUB_TOKEN}\"|g" "${{ inputs.TOML_CONFIG_FILE }}"
-          fi
       - name: Build SAM
-        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.UAT_TOML_CONFIG }} --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
+        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN --parameter-overrides GithubToken=$GITHUB_TOKEN
       - name: Deploy SAM template
         run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.UAT_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset --resolve-image-repos
