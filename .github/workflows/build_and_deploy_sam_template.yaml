@@ -34,17 +34,16 @@ on:
         type: string
       PYTHON_VERSION:
         type: string
-        default: "3.8"
+        default: '3.8'
         required: false
       ARM_SUPPORT:
         type: boolean
         default: false
         required: false
 
-
 permissions:
   id-token: write # This is required for requesting the JWT
-  contents: read  # This is required for actions/checkout
+  contents: read # This is required for actions/checkout
 
 env:
   GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
@@ -72,7 +71,7 @@ jobs:
       - name: Validate template
         run: sam validate --template-file ${{ inputs.TEMPLATE_NAME }}
       - name: Build SAM
-        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
+        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN --parameter-overrides GithubToken=$GITHUB_TOKEN
       - name: Deploy SAM template
         run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.DEV_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset --resolve-image-repos
   deploy-qa:
@@ -99,7 +98,7 @@ jobs:
       - name: Validate template
         run: sam validate --template-file ${{ inputs.TEMPLATE_NAME }}
       - name: Build SAM
-        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
+        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN --parameter-overrides GithubToken=$GITHUB_TOKEN
       - name: Deploy SAM template
         run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.QA_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset --resolve-image-repos
   deploy-uat:
@@ -126,6 +125,6 @@ jobs:
       - name: Validate template
         run: sam validate --template-file ${{ inputs.TEMPLATE_NAME }}
       - name: Build SAM
-        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN
+        run: sam build --template-file ${{ inputs.TEMPLATE_NAME }} --use-container -p --container-env-var GITHUB_TOKEN=$GITHUB_TOKEN --parameter-overrides GithubToken=$GITHUB_TOKEN
       - name: Deploy SAM template
         run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.UAT_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset --resolve-image-repos
