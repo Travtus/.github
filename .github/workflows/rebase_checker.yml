@@ -1,0 +1,50 @@
+name: Rebase Checker
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-up-to-date-with-base:
+    name: Verify the branch contains the latest changes from the PR base
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout PR head commit
+        uses: actions/checkout@v6
+        with:
+          # Default merge ref would make the ancestor check trivially pass.
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Fetch PR base branch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch origin "${{ github.base_ref }}" --depth=1 \
+            || git fetch origin "${{ github.base_ref }}"
+
+          if ! git rev-parse --verify "origin/${{ github.base_ref }}" > /dev/null 2>&1; then
+            echo "::error::Could not resolve base branch 'origin/${{ github.base_ref }}'."
+            exit 1
+          fi
+
+      - name: Fail if branch is not up to date with the PR base
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BASE="origin/${{ github.base_ref }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+
+          echo "Checking whether $BASE is an ancestor of $HEAD"
+
+          if git merge-base --is-ancestor "$BASE" "$HEAD"; then
+            echo "Branch includes the latest changes from $BASE"
+          else
+            echo "::error::Deployment blocked. This branch does not include the latest changes from $BASE. Rebase against '${{ github.base_ref }}' before deploying."
+            exit 1
+          fi
