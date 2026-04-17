@@ -89,7 +89,11 @@ env:
   PY_GLOB: "./**/*.py"
 
 jobs:
+  pr-size-check:
+    uses: ./.github/workflows/pr_size_check.yml
+
   build:
+    needs: pr-size-check
     runs-on: ubuntu-latest
     services:
       postgres:
