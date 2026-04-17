@@ -31,7 +31,7 @@ jobs:
             exit 1
           fi
 
-      - name: Calculate changed lines excluding markdown and test folders
+      - name: Calculate changed lines excluding configured non-code paths
         id: diff
         shell: bash
         run: |
@@ -48,7 +48,10 @@ jobs:
               ':(exclude,icase,glob)**/test/**' \
               ':(exclude,icase,glob)**/tests/**' \
               ':(exclude,icase,glob)**/unit_test/**' \
-              ':(exclude,icase,glob)**/unit_tests/**' |
+              ':(exclude,icase,glob)**/unit_tests/**' \
+              ':(exclude,glob)uv.lock' \
+              ':(exclude,glob)pyproject.toml' \
+              ':(exclude,glob).github/workflows/**' |
             awk -F '\t' '
               # FS=\t keeps rename/space paths as NF==3; binaries are "-\t-\t..".
               BEGIN { add = 0; del = 0 }
@@ -61,7 +64,7 @@ jobs:
           )
 
           echo "changed_lines=$CHANGED_LINES" >> "$GITHUB_OUTPUT"
-          echo "Changed lines (excluding docs, test folders, and binary files): $CHANGED_LINES"
+          echo "Changed lines (excluding markdown, test folders, uv.lock, pyproject.toml, .github/workflows, and binary files): $CHANGED_LINES"
 
       - name: Fail if PR exceeds limit
         # Skipped when the 'large-pr-exception' label is present on the PR.
@@ -77,6 +80,6 @@ jobs:
           echo "Actual: $ACTUAL"
 
           if [ "$ACTUAL" -gt "$LIMIT" ]; then
-            echo "::error::PR is too large: $ACTUAL changed lines (limit: $LIMIT, excluding markdown, test folders, and binary files). Split this into smaller PRs or add the 'large-pr-exception' label."
+            echo "::error::PR is too large: $ACTUAL changed lines (limit: $LIMIT, excluding markdown, test folders, uv.lock, pyproject.toml, .github/workflows, and binary files). Split this into smaller PRs"
             exit 1
           fi
