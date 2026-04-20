@@ -1,0 +1,85 @@
+name: PR Size Check
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  enforce-pr-size:
+    name: Enforce PR line limit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout PR HEAD
+        uses: actions/checkout@v6
+        with:
+          # github.sha is the base tip for pull_request_target, so pin to head.
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Fetch base branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "${{ github.base_ref }}" --depth=1 \
+            || git fetch origin "${{ github.base_ref }}"
+
+          if ! git rev-parse --verify "origin/${{ github.base_ref }}" > /dev/null 2>&1; then
+            echo "::error::Could not resolve base branch 'origin/${{ github.base_ref }}'."
+            exit 1
+          fi
+
+      - name: Calculate changed lines excluding configured non-code paths
+        id: diff
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BASE="origin/${{ github.base_ref }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+
+          # (glob) makes ** span zero or more segments (root + nested in one pattern);
+          # (icase) folds .md/.MD and test/Test together.
+          CHANGED_LINES=$(
+            git diff --numstat "$BASE...$HEAD" -- . \
+              ':(exclude,icase,glob)**/*.md' \
+              ':(exclude,icase,glob)**/test/**' \
+              ':(exclude,icase,glob)**/tests/**' \
+              ':(exclude,icase,glob)**/unit_test/**' \
+              ':(exclude,icase,glob)**/unit_tests/**' \
+              ':(exclude,glob)uv.lock' \
+              ':(exclude,glob)pyproject.toml' \
+              ':(exclude,glob).github/workflows/**' |
+            awk -F '\t' '
+              # FS=\t keeps rename/space paths as NF==3; binaries are "-\t-\t..".
+              BEGIN { add = 0; del = 0 }
+              /^[0-9]/ && NF == 3 {
+                add += $1
+                del += $2
+              }
+              END { print add + del }
+            '
+          )
+
+          echo "changed_lines=$CHANGED_LINES" >> "$GITHUB_OUTPUT"
+          echo "Changed lines (excluding markdown, test folders, uv.lock, pyproject.toml, .github/workflows, and binary files): $CHANGED_LINES"
+
+      - name: Fail if PR exceeds limit
+        # Skipped when the 'large-pr-exception' label is present on the PR.
+        if: ${{ !contains(github.event.pull_request.labels.*.name, 'large-pr-exception') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          LIMIT=700
+          ACTUAL="${{ steps.diff.outputs.changed_lines }}"
+
+          echo "Limit: $LIMIT"
+          echo "Actual: $ACTUAL"
+
+          if [ "$ACTUAL" -gt "$LIMIT" ]; then
+            echo "::error::PR is too large: $ACTUAL changed lines (limit: $LIMIT, excluding markdown, test folders, uv.lock, pyproject.toml, .github/workflows, and binary files). Split this into smaller PRs"
+            exit 1
+          fi
