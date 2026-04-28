@@ -17,6 +17,11 @@ on:
       ECR_REPO_NAME:
         required: true
         type: string
+      DOCKER_CONTEXT:
+        required: false
+        default: "."
+        type: string
+        description: "Docker build context path (defaults to repo root)"
 
 
 permissions:
@@ -40,7 +45,7 @@ jobs:
       - name: Login to ECR
         run: aws ecr get-login-password --region ${{ inputs.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT }}.dkr.ecr.${{ inputs.AWS_REGION }}.amazonaws.com
       - name: Build Docker image
-        run: docker build -t ${{ inputs.ECR_REPO_NAME }} . --build-arg GITHUB_TOKEN=$GITHUB_TOKEN
+        run: docker build -t ${{ inputs.ECR_REPO_NAME }} ${{ inputs.DOCKER_CONTEXT }} --build-arg GITHUB_TOKEN=$GITHUB_TOKEN
       - name: Tag Docker image
         run: docker tag ${{ inputs.ECR_REPO_NAME }}:latest ${{ secrets.AWS_ACCOUNT }}.dkr.ecr.${{ inputs.AWS_REGION }}.amazonaws.com/${{ inputs.ECR_REPO_NAME }}:latest
       - name: Push Docker image

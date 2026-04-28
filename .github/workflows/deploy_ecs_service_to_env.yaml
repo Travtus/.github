@@ -1,0 +1,81 @@
+name: Deploy ECS service to one environment
+
+on:
+  workflow_call:
+    inputs:
+      ECR_REPO_NAME:
+        required: true
+        type: string
+        description: "ECR repository name"
+      DOCKER_CONTEXT:
+        required: false
+        default: "."
+        type: string
+        description: "Docker build context path"
+      ECS_CLUSTER_NAME:
+        required: true
+        type: string
+        description: "ECS cluster name"
+      TASK_DEF:
+        required: true
+        type: string
+        description: "Service task definition family or ARN (used with command override for migrations)"
+      CONTAINER_NAME:
+        required: true
+        type: string
+        description: "Container name within the task definition"
+      SUBNET_IDS:
+        required: true
+        type: string
+        description: "Comma-separated private subnet IDs"
+      RUN_MIGRATIONS:
+        required: false
+        default: true
+        type: boolean
+        description: "Whether to run Alembic migrations before restarting the service"
+      AWS_REGION:
+        required: false
+        default: "us-east-2"
+        type: string
+    secrets:
+      PAT_GITHUB:
+        required: true
+      AWS_OIDC_ROLE_ARN:
+        required: true
+      AWS_ACCOUNT:
+        required: true
+
+jobs:
+  build:
+    uses: ./.github/workflows/build_and_deploy_docker_to_ecr.yaml
+    secrets:
+      PAT_GITHUB: ${{ secrets.PAT_GITHUB }}
+      AWS_OIDC_ROLE_ARN: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+      AWS_ACCOUNT: ${{ secrets.AWS_ACCOUNT }}
+    with:
+      AWS_REGION: ${{ inputs.AWS_REGION }}
+      ECR_REPO_NAME: ${{ inputs.ECR_REPO_NAME }}
+      DOCKER_CONTEXT: ${{ inputs.DOCKER_CONTEXT }}
+
+  migrate:
+    needs: build
+    if: ${{ inputs.RUN_MIGRATIONS }}
+    uses: ./.github/workflows/run-alembic-migrations.yml
+    secrets:
+      AWS_OIDC_ROLE_ARN: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+    with:
+      ECS_CLUSTER_NAME: ${{ inputs.ECS_CLUSTER_NAME }}
+      TASK_DEF: ${{ inputs.TASK_DEF }}
+      CONTAINER_NAME: ${{ inputs.CONTAINER_NAME }}
+      SUBNET_IDS: ${{ inputs.SUBNET_IDS }}
+      AWS_REGION: ${{ inputs.AWS_REGION }}
+
+  restart:
+    needs: [build, migrate]
+    if: ${{ always() && needs.build.result == 'success' && (needs.migrate.result == 'success' || needs.migrate.result == 'skipped') }}
+    uses: ./.github/workflows/restart-ecs-services-template.yaml
+    secrets:
+      AWS_OIDC_ROLE_ARN: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+    with:
+      ECS_CLUSTER_NAME: ${{ inputs.ECS_CLUSTER_NAME }}
+      AWS_REGION: ${{ inputs.AWS_REGION }}
