@@ -91,12 +91,6 @@ jobs:
           role-session-name: samplerolesession
           aws-region: ${{ inputs.AWS_REGION }}
 
-      - name: Build container command JSON
-        id: cmd
-        run: |
-          COMMAND_JSON=$(jq -cn '$ARGS.positional' --args alembic ${{ inputs.MIGRATION_COMMAND }})
-          echo "json=${COMMAND_JSON}" >> "$GITHUB_OUTPUT"
-
       - name: Run migration as one-shot ECS task
         id: run-task
         run: |
@@ -107,12 +101,16 @@ jobs:
           else
             NETWORK_CONFIG="awsvpcConfiguration={subnets=[${{ inputs.SUBNET_IDS }}],assignPublicIp=DISABLED}"
           fi
+          OVERRIDES=$(jq -cn \
+            --arg name "${{ inputs.CONTAINER_NAME }}" \
+            --args '{"containerOverrides":[{"name":$name,"command":$ARGS.positional}]}' \
+            -- alembic ${{ inputs.MIGRATION_COMMAND }})
           TASK_ARN=$(aws ecs run-task \
             --cluster "${{ inputs.ECS_CLUSTER_NAME }}" \
             --task-definition "${{ inputs.TASK_DEF }}" \
             --launch-type FARGATE \
             --network-configuration "${NETWORK_CONFIG}" \
-            --overrides "{\"containerOverrides\":[{\"name\":\"${{ inputs.CONTAINER_NAME }}\",\"command\":${{ steps.cmd.outputs.json }}}]}" \
+            --overrides "${OVERRIDES}" \
             --region "${{ inputs.AWS_REGION }}" \
             --query "tasks[0].taskArn" \
             --output text)
