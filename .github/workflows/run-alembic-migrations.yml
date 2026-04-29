@@ -28,7 +28,7 @@ on:
         type: string
         required: false
         default: "upgrade head"
-        description: "Alembic command — e.g. 'upgrade head', 'downgrade -1'"
+        description: "Supported Alembic command: upgrade head, downgrade -1, or downgrade base"
       AWS_REGION:
         type: string
         required: false
@@ -61,7 +61,7 @@ on:
         default: ""
         type: string
       MIGRATION_COMMAND:
-        description: "Alembic command to run"
+        description: "Supported Alembic command to run"
         required: false
         default: "upgrade head"
         type: choice

@@ -38,6 +38,11 @@ on:
         default: true
         type: boolean
         description: "Whether to run Alembic migrations before restarting the service"
+      MIGRATION_COMMAND:
+        required: false
+        default: "upgrade head"
+        type: string
+        description: "Supported Alembic command: upgrade head, downgrade -1, or downgrade base"
       AWS_REGION:
         required: false
         default: "us-east-2"
@@ -74,6 +79,7 @@ jobs:
       CONTAINER_NAME: ${{ inputs.CONTAINER_NAME }}
       SUBNET_IDS: ${{ inputs.SUBNET_IDS }}
       SECURITY_GROUP_ID: ${{ inputs.SECURITY_GROUP_ID }}
+      MIGRATION_COMMAND: ${{ inputs.MIGRATION_COMMAND }}
       AWS_REGION: ${{ inputs.AWS_REGION }}
 
   restart:
