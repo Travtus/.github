@@ -50,8 +50,8 @@ jobs:
       - name: Build Docker image
         env:
           ECR_REPO_NAME: ${{ inputs.ECR_REPO_NAME }}
-          DOCKER_CONTEXT: ${{ inputs.DOCKER_CONTEXT }}
-        run: docker build --build-arg "GITHUB_TOKEN=${GITHUB_TOKEN}" -t "${ECR_REPO_NAME}" "${DOCKER_CONTEXT}"
+          DOCKER_BUILD_CONTEXT: ${{ inputs.DOCKER_CONTEXT }}
+        run: docker build --build-arg "GITHUB_TOKEN=${GITHUB_TOKEN}" -t "${ECR_REPO_NAME}" "${DOCKER_BUILD_CONTEXT}"
       - name: Tag Docker image
         env:
           AWS_ACCOUNT: ${{ secrets.AWS_ACCOUNT }}
