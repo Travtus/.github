@@ -1,0 +1,203 @@
+name: Run Alembic Migrations
+
+on:
+  workflow_call:
+    inputs:
+      ECS_CLUSTER_NAME:
+        type: string
+        required: true
+        description: "ECS cluster name"
+      TASK_DEF:
+        type: string
+        required: true
+        description: "Service task definition family or ARN — reused with command override"
+      CONTAINER_NAME:
+        type: string
+        required: true
+        description: "Container name within the task definition"
+      SUBNET_IDS:
+        type: string
+        required: true
+        description: "Comma-separated private subnet IDs"
+      SECURITY_GROUP_ID:
+        type: string
+        required: false
+        default: ""
+        description: "Security group ID for the task (omit to use VPC default)"
+      MIGRATION_COMMAND:
+        type: string
+        required: false
+        default: "upgrade head"
+        description: "Supported Alembic command: upgrade head, downgrade -1, or downgrade base"
+      AWS_REGION:
+        type: string
+        required: false
+        default: "us-east-2"
+    secrets:
+      AWS_OIDC_ROLE_ARN:
+        required: true
+
+  workflow_dispatch:
+    inputs:
+      ECS_CLUSTER_NAME:
+        description: "ECS cluster name"
+        required: true
+        type: string
+      TASK_DEF:
+        description: "Service task definition (family:revision or ARN)"
+        required: true
+        type: string
+      CONTAINER_NAME:
+        description: "Container name in task definition"
+        required: true
+        type: string
+      SUBNET_IDS:
+        description: "Comma-separated private subnet IDs"
+        required: true
+        type: string
+      SECURITY_GROUP_ID:
+        description: "Security group ID for the task (omit to use VPC default)"
+        required: false
+        default: ""
+        type: string
+      MIGRATION_COMMAND:
+        description: "Supported Alembic command to run"
+        required: false
+        default: "upgrade head"
+        type: choice
+        options:
+          - "upgrade head"
+          - "downgrade -1"
+          - "downgrade base"
+      AWS_REGION:
+        description: "AWS region"
+        required: false
+        default: "us-east-2"
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  run-migration:
+    name: Run Alembic migration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          role-session-name: samplerolesession
+          aws-region: ${{ inputs.AWS_REGION }}
+
+      - name: Run migration as one-shot ECS task
+        id: run-task
+        env:
+          AWS_REGION: ${{ inputs.AWS_REGION }}
+          CONTAINER_NAME: ${{ inputs.CONTAINER_NAME }}
+          ECS_CLUSTER_NAME: ${{ inputs.ECS_CLUSTER_NAME }}
+          MIGRATION_COMMAND: ${{ inputs.MIGRATION_COMMAND }}
+          SECURITY_GROUP_ID: ${{ inputs.SECURITY_GROUP_ID }}
+          SUBNET_IDS: ${{ inputs.SUBNET_IDS }}
+          TASK_DEF: ${{ inputs.TASK_DEF }}
+        run: |
+          set -e
+          SG="${SECURITY_GROUP_ID}"
+          if [ -n "${SG}" ]; then
+            NETWORK_CONFIG="awsvpcConfiguration={subnets=[${SUBNET_IDS}],securityGroups=[${SG}],assignPublicIp=DISABLED}"
+          else
+            NETWORK_CONFIG="awsvpcConfiguration={subnets=[${SUBNET_IDS}],assignPublicIp=DISABLED}"
+          fi
+
+          case "${MIGRATION_COMMAND}" in
+            "upgrade head")
+              OVERRIDES=$(jq -cn --arg name "${CONTAINER_NAME}" '{"containerOverrides":[{"name":$name,"command":["alembic","upgrade","head"]}]}')
+              ;;
+            "downgrade -1")
+              OVERRIDES=$(jq -cn --arg name "${CONTAINER_NAME}" '{"containerOverrides":[{"name":$name,"command":["alembic","downgrade","-1"]}]}')
+              ;;
+            "downgrade base")
+              OVERRIDES=$(jq -cn --arg name "${CONTAINER_NAME}" '{"containerOverrides":[{"name":$name,"command":["alembic","downgrade","base"]}]}')
+              ;;
+            *)
+              echo "ERROR: unsupported MIGRATION_COMMAND: ${MIGRATION_COMMAND}"
+              echo "Allowed values: upgrade head, downgrade -1, downgrade base"
+              exit 1
+              ;;
+          esac
+
+          TASK_ARN=$(aws ecs run-task \
+            --cluster "${ECS_CLUSTER_NAME}" \
+            --task-definition "${TASK_DEF}" \
+            --launch-type FARGATE \
+            --network-configuration "${NETWORK_CONFIG}" \
+            --overrides "${OVERRIDES}" \
+            --region "${AWS_REGION}" \
+            --query "tasks[0].taskArn" \
+            --output text)
+          echo "task_arn=${TASK_ARN}" >> "$GITHUB_OUTPUT"
+          echo "Started task: ${TASK_ARN}"
+
+      - name: Wait for task to complete
+        env:
+          AWS_REGION: ${{ inputs.AWS_REGION }}
+          ECS_CLUSTER_NAME: ${{ inputs.ECS_CLUSTER_NAME }}
+          TASK_ARN: ${{ steps.run-task.outputs.task_arn }}
+        run: |
+          set -e
+          CLUSTER="${ECS_CLUSTER_NAME}"
+          REGION="${AWS_REGION}"
+
+          aws ecs wait tasks-stopped \
+            --cluster "${CLUSTER}" \
+            --tasks "${TASK_ARN}" \
+            --region "${REGION}"
+
+      - name: Check exit code and print log URL
+        env:
+          AWS_REGION: ${{ inputs.AWS_REGION }}
+          CONTAINER_NAME: ${{ inputs.CONTAINER_NAME }}
+          ECS_CLUSTER_NAME: ${{ inputs.ECS_CLUSTER_NAME }}
+          TASK_ARN: ${{ steps.run-task.outputs.task_arn }}
+        run: |
+          set -e
+          CLUSTER="${ECS_CLUSTER_NAME}"
+          REGION="${AWS_REGION}"
+
+          RESULT=$(aws ecs describe-tasks \
+            --cluster "${CLUSTER}" \
+            --tasks "${TASK_ARN}" \
+            --region "${REGION}")
+
+          CONTAINER=$(echo "${RESULT}" | jq -er --arg name "${CONTAINER_NAME}" '.tasks[0].containers[] | select(.name == $name)') || {
+            echo "ERROR: container ${CONTAINER_NAME} was not found in task result"
+            exit 1
+          }
+          EXIT_CODE=$(echo "${CONTAINER}" | jq -r ".exitCode")
+          STOP_REASON=$(echo "${RESULT}" | jq -r ".tasks[0].stoppedReason // \"none\"")
+          TASK_DEF_ARN=$(echo "${RESULT}" | jq -r ".tasks[0].taskDefinitionArn")
+          LOG_STREAM=$(echo "${CONTAINER}" | jq -r ".logStreamName // empty")
+          TASK_DEF_RESULT=$(aws ecs describe-task-definition \
+            --task-definition "${TASK_DEF_ARN}" \
+            --region "${REGION}")
+          LOG_GROUP=$(echo "${TASK_DEF_RESULT}" | jq -r --arg name "${CONTAINER_NAME}" '.taskDefinition.containerDefinitions[] | select(.name == $name) | .logConfiguration.options["awslogs-group"] // empty')
+
+          if [ -n "${LOG_GROUP}" ] && [ -n "${LOG_STREAM}" ]; then
+            echo "CloudWatch logs:"
+            echo "Log group: ${LOG_GROUP}"
+            echo "Log stream: ${LOG_STREAM}"
+            echo "https://${REGION}.console.aws.amazon.com/cloudwatch/home?region=${REGION}#logsV2:log-groups/log-group/${LOG_GROUP}/log-events/${LOG_STREAM}"
+          fi
+
+          if [ "${EXIT_CODE}" = "null" ]; then
+            echo "ERROR: migration task stopped before container ran — reason: ${STOP_REASON}"
+            exit 1
+          fi
+
+          if [ "${EXIT_CODE}" != "0" ]; then
+            echo "ERROR: migration failed — exit code ${EXIT_CODE}, reason: ${STOP_REASON}"
+            exit 1
+          fi
+
+          echo "Migration completed successfully"

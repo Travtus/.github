@@ -43,11 +43,14 @@ jobs:
 
       - name: Restart all ECS services in cluster
         if: inputs.ECS_CLUSTER_NAME != ''
+        env:
+          AWS_REGION: ${{ inputs.AWS_REGION }}
+          ECS_CLUSTER_NAME: ${{ inputs.ECS_CLUSTER_NAME }}
         run: |
           set -e
-          CLUSTER_NAME="${{ inputs.ECS_CLUSTER_NAME }}"
-          REGION="${{ inputs.AWS_REGION }}"
-          
+          CLUSTER_NAME="${ECS_CLUSTER_NAME}"
+          REGION="${AWS_REGION}"
+
           echo "Finding all services in cluster: ${CLUSTER_NAME}"
           
           mapfile -t SERVICES < <(aws ecs list-services \
