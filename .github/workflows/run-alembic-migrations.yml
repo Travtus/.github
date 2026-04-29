@@ -93,36 +93,61 @@ jobs:
 
       - name: Run migration as one-shot ECS task
         id: run-task
+        env:
+          AWS_REGION: ${{ inputs.AWS_REGION }}
+          CONTAINER_NAME: ${{ inputs.CONTAINER_NAME }}
+          ECS_CLUSTER_NAME: ${{ inputs.ECS_CLUSTER_NAME }}
+          MIGRATION_COMMAND: ${{ inputs.MIGRATION_COMMAND }}
+          SECURITY_GROUP_ID: ${{ inputs.SECURITY_GROUP_ID }}
+          SUBNET_IDS: ${{ inputs.SUBNET_IDS }}
+          TASK_DEF: ${{ inputs.TASK_DEF }}
         run: |
           set -e
-          SG="${{ inputs.SECURITY_GROUP_ID }}"
+          SG="${SECURITY_GROUP_ID}"
           if [ -n "${SG}" ]; then
-            NETWORK_CONFIG="awsvpcConfiguration={subnets=[${{ inputs.SUBNET_IDS }}],securityGroups=[${SG}],assignPublicIp=DISABLED}"
+            NETWORK_CONFIG="awsvpcConfiguration={subnets=[${SUBNET_IDS}],securityGroups=[${SG}],assignPublicIp=DISABLED}"
           else
-            NETWORK_CONFIG="awsvpcConfiguration={subnets=[${{ inputs.SUBNET_IDS }}],assignPublicIp=DISABLED}"
+            NETWORK_CONFIG="awsvpcConfiguration={subnets=[${SUBNET_IDS}],assignPublicIp=DISABLED}"
           fi
-          OVERRIDES=$(jq -cn \
-            --arg name "${{ inputs.CONTAINER_NAME }}" \
-            --args '{"containerOverrides":[{"name":$name,"command":$ARGS.positional}]}' \
-            -- alembic ${{ inputs.MIGRATION_COMMAND }})
+
+          case "${MIGRATION_COMMAND}" in
+            "upgrade head")
+              OVERRIDES=$(jq -cn --arg name "${CONTAINER_NAME}" '{"containerOverrides":[{"name":$name,"command":["alembic","upgrade","head"]}]}')
+              ;;
+            "downgrade -1")
+              OVERRIDES=$(jq -cn --arg name "${CONTAINER_NAME}" '{"containerOverrides":[{"name":$name,"command":["alembic","downgrade","-1"]}]}')
+              ;;
+            "downgrade base")
+              OVERRIDES=$(jq -cn --arg name "${CONTAINER_NAME}" '{"containerOverrides":[{"name":$name,"command":["alembic","downgrade","base"]}]}')
+              ;;
+            *)
+              echo "ERROR: unsupported MIGRATION_COMMAND: ${MIGRATION_COMMAND}"
+              echo "Allowed values: upgrade head, downgrade -1, downgrade base"
+              exit 1
+              ;;
+          esac
+
           TASK_ARN=$(aws ecs run-task \
-            --cluster "${{ inputs.ECS_CLUSTER_NAME }}" \
-            --task-definition "${{ inputs.TASK_DEF }}" \
+            --cluster "${ECS_CLUSTER_NAME}" \
+            --task-definition "${TASK_DEF}" \
             --launch-type FARGATE \
             --network-configuration "${NETWORK_CONFIG}" \
             --overrides "${OVERRIDES}" \
-            --region "${{ inputs.AWS_REGION }}" \
+            --region "${AWS_REGION}" \
             --query "tasks[0].taskArn" \
             --output text)
           echo "task_arn=${TASK_ARN}" >> "$GITHUB_OUTPUT"
           echo "Started task: ${TASK_ARN}"
 
       - name: Wait for task to complete
+        env:
+          AWS_REGION: ${{ inputs.AWS_REGION }}
+          ECS_CLUSTER_NAME: ${{ inputs.ECS_CLUSTER_NAME }}
+          TASK_ARN: ${{ steps.run-task.outputs.task_arn }}
         run: |
           set -e
-          TASK_ARN="${{ steps.run-task.outputs.task_arn }}"
-          CLUSTER="${{ inputs.ECS_CLUSTER_NAME }}"
-          REGION="${{ inputs.AWS_REGION }}"
+          CLUSTER="${ECS_CLUSTER_NAME}"
+          REGION="${AWS_REGION}"
 
           aws ecs wait tasks-stopped \
             --cluster "${CLUSTER}" \
@@ -130,25 +155,39 @@ jobs:
             --region "${REGION}"
 
       - name: Check exit code and print log URL
+        env:
+          AWS_REGION: ${{ inputs.AWS_REGION }}
+          CONTAINER_NAME: ${{ inputs.CONTAINER_NAME }}
+          ECS_CLUSTER_NAME: ${{ inputs.ECS_CLUSTER_NAME }}
+          TASK_ARN: ${{ steps.run-task.outputs.task_arn }}
         run: |
           set -e
-          TASK_ARN="${{ steps.run-task.outputs.task_arn }}"
-          CLUSTER="${{ inputs.ECS_CLUSTER_NAME }}"
-          REGION="${{ inputs.AWS_REGION }}"
-          TASK_ID="${TASK_ARN##*/}"
+          CLUSTER="${ECS_CLUSTER_NAME}"
+          REGION="${AWS_REGION}"
 
           RESULT=$(aws ecs describe-tasks \
             --cluster "${CLUSTER}" \
             --tasks "${TASK_ARN}" \
             --region "${REGION}")
 
-          EXIT_CODE=$(echo "${RESULT}" | jq -r ".tasks[0].containers[0].exitCode")
+          CONTAINER=$(echo "${RESULT}" | jq -er --arg name "${CONTAINER_NAME}" '.tasks[0].containers[] | select(.name == $name)') || {
+            echo "ERROR: container ${CONTAINER_NAME} was not found in task result"
+            exit 1
+          }
+          EXIT_CODE=$(echo "${CONTAINER}" | jq -r ".exitCode")
           STOP_REASON=$(echo "${RESULT}" | jq -r ".tasks[0].stoppedReason // \"none\"")
-          LOG_GROUP=$(echo "${RESULT}" | jq -r ".tasks[0].containers[0].logConfiguration.options[\"awslogs-group\"] // empty")
+          TASK_DEF_ARN=$(echo "${RESULT}" | jq -r ".tasks[0].taskDefinitionArn")
+          LOG_STREAM=$(echo "${CONTAINER}" | jq -r ".logStreamName // empty")
+          TASK_DEF_RESULT=$(aws ecs describe-task-definition \
+            --task-definition "${TASK_DEF_ARN}" \
+            --region "${REGION}")
+          LOG_GROUP=$(echo "${TASK_DEF_RESULT}" | jq -r --arg name "${CONTAINER_NAME}" '.taskDefinition.containerDefinitions[] | select(.name == $name) | .logConfiguration.options["awslogs-group"] // empty')
 
-          if [ -n "${LOG_GROUP}" ]; then
+          if [ -n "${LOG_GROUP}" ] && [ -n "${LOG_STREAM}" ]; then
             echo "CloudWatch logs:"
-            echo "https://${REGION}.console.aws.amazon.com/cloudwatch/home?region=${REGION}#logsV2:log-groups/log-group/${LOG_GROUP}/log-events/${TASK_ID}"
+            echo "Log group: ${LOG_GROUP}"
+            echo "Log stream: ${LOG_STREAM}"
+            echo "https://${REGION}.console.aws.amazon.com/cloudwatch/home?region=${REGION}#logsV2:log-groups/log-group/${LOG_GROUP}/log-events/${LOG_STREAM}"
           fi
 
           if [ "${EXIT_CODE}" = "null" ]; then

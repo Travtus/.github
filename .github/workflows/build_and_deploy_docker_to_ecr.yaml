@@ -43,10 +43,24 @@ jobs:
           role-session-name: samplerolesession
           aws-region: us-east-2
       - name: Login to ECR
-        run: aws ecr get-login-password --region ${{ inputs.AWS_REGION }} | docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT }}.dkr.ecr.${{ inputs.AWS_REGION }}.amazonaws.com
+        env:
+          AWS_ACCOUNT: ${{ secrets.AWS_ACCOUNT }}
+          AWS_REGION: ${{ inputs.AWS_REGION }}
+        run: aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com"
       - name: Build Docker image
-        run: docker build -t ${{ inputs.ECR_REPO_NAME }} ${{ inputs.DOCKER_CONTEXT }} --build-arg GITHUB_TOKEN=$GITHUB_TOKEN
+        env:
+          ECR_REPO_NAME: ${{ inputs.ECR_REPO_NAME }}
+          DOCKER_CONTEXT: ${{ inputs.DOCKER_CONTEXT }}
+        run: docker build --build-arg "GITHUB_TOKEN=${GITHUB_TOKEN}" -t "${ECR_REPO_NAME}" -- "${DOCKER_CONTEXT}"
       - name: Tag Docker image
-        run: docker tag ${{ inputs.ECR_REPO_NAME }}:latest ${{ secrets.AWS_ACCOUNT }}.dkr.ecr.${{ inputs.AWS_REGION }}.amazonaws.com/${{ inputs.ECR_REPO_NAME }}:latest
+        env:
+          AWS_ACCOUNT: ${{ secrets.AWS_ACCOUNT }}
+          AWS_REGION: ${{ inputs.AWS_REGION }}
+          ECR_REPO_NAME: ${{ inputs.ECR_REPO_NAME }}
+        run: docker tag "${ECR_REPO_NAME}:latest" "${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:latest"
       - name: Push Docker image
-        run: docker push ${{ secrets.AWS_ACCOUNT }}.dkr.ecr.${{ inputs.AWS_REGION }}.amazonaws.com/${{ inputs.ECR_REPO_NAME }}:latest
+        env:
+          AWS_ACCOUNT: ${{ secrets.AWS_ACCOUNT }}
+          AWS_REGION: ${{ inputs.AWS_REGION }}
+          ECR_REPO_NAME: ${{ inputs.ECR_REPO_NAME }}
+        run: docker push "${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:latest"

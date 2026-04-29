@@ -28,6 +28,11 @@ on:
         required: true
         type: string
         description: "Comma-separated private subnet IDs"
+      SECURITY_GROUP_ID:
+        required: false
+        default: ""
+        type: string
+        description: "Security group ID for the migration task (omit to use VPC default)"
       RUN_MIGRATIONS:
         required: false
         default: true
@@ -68,6 +73,7 @@ jobs:
       TASK_DEF: ${{ inputs.TASK_DEF }}
       CONTAINER_NAME: ${{ inputs.CONTAINER_NAME }}
       SUBNET_IDS: ${{ inputs.SUBNET_IDS }}
+      SECURITY_GROUP_ID: ${{ inputs.SECURITY_GROUP_ID }}
       AWS_REGION: ${{ inputs.AWS_REGION }}
 
   restart:
