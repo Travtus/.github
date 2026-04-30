@@ -26,6 +26,7 @@ Fails a PR when the number of changed lines exceeds **700** (configurable in the
 **Excluded from the line count:**
 - `**/*.md`
 - `**/test/**`, `**/tests/**`, `**/unit_test/**`, `**/unit_tests/**`
+- `**/open_api.yaml`
 - `uv.lock`
 - `pyproject.toml`
 - `.github/workflows/**`
