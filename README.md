@@ -21,7 +21,9 @@ For other package management tools, like `pip`, `poetry`, you can use the `pypro
 
 Fails a PR when the number of changed lines exceeds **700** (configurable in the workflow). Designed to keep PRs reviewable and aligned with trunk-based development.
 
-**Triggers:** `pull_request`, `workflow_call`
+**Triggers:** `pull_request`, `pull_request_review`, `workflow_call`
+
+Add the `large-pr-exception` label only when a PR cannot reasonably be split. When the label is present, the size failure is skipped, but the workflow requests review from the Platform Admin team and fails until that team review request is resolved.
 
 **Excluded from the line count:**
 - `**/*.md`

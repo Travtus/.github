@@ -2,33 +2,39 @@ name: PR Size Check
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
   workflow_call:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   enforce-pr-size:
     name: Enforce PR line limit
     runs-on: ubuntu-latest
+    env:
+      BASE_REF: ${{ github.event.pull_request.base.ref }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
 
     steps:
       - name: Checkout PR HEAD
         uses: actions/checkout@v6
         with:
-          # github.sha is the base tip for pull_request_target, so pin to head.
-          ref: ${{ github.event.pull_request.head.sha }}
+          # Pin to the PR head so review events diff the same commit under review.
+          ref: ${{ env.HEAD_SHA }}
           fetch-depth: 0
 
       - name: Fetch base branch
         shell: bash
         run: |
           set -euo pipefail
-          git fetch origin "${{ github.base_ref }}" --depth=1 \
-            || git fetch origin "${{ github.base_ref }}"
+          git fetch origin "$BASE_REF" --depth=1 || git fetch origin "$BASE_REF"
 
-          if ! git rev-parse --verify "origin/${{ github.base_ref }}" > /dev/null 2>&1; then
-            echo "::error::Could not resolve base branch 'origin/${{ github.base_ref }}'."
+          if ! git rev-parse --verify "origin/$BASE_REF" > /dev/null 2>&1; then
+            echo "::error::Could not resolve base branch 'origin/$BASE_REF'."
             exit 1
           fi
 
@@ -38,8 +44,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          BASE="origin/${{ github.base_ref }}"
-          HEAD="${{ github.event.pull_request.head.sha }}"
+          BASE="origin/$BASE_REF"
+          HEAD="$HEAD_SHA"
 
           # (glob) makes ** span zero or more segments (root + nested in one pattern);
           # (icase) folds .md/.MD and test/Test together.
@@ -86,3 +92,31 @@ jobs:
             echo "::error::PR is too large: $ACTUAL changed lines (limit: $LIMIT, excluding markdown, test folders, alembic folders, open_api.yaml, uv.lock, pyproject.toml, .github/workflows, and binary files). Split this into smaller PRs"
             exit 1
           fi
+
+      - name: Require Platform Admin review for large PR exception
+        if: ${{ contains(github.event.pull_request.labels.*.name, 'large-pr-exception') }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const teamSlug = 'platform-admin';
+            const { owner, repo } = context.repo;
+            const pull_number = context.payload.pull_request.number;
+            const base = { owner, repo, pull_number };
+
+            const { data: pull } = await github.rest.pulls.get(base);
+            const platformAdminReviewPending = pull.requested_teams.some((team) => {
+              return team.slug === teamSlug;
+            });
+
+            if (context.eventName === 'pull_request_review' && !platformAdminReviewPending) {
+              return;
+            }
+
+            await github.rest.pulls.requestReviewers({
+              ...base,
+              team_reviewers: [teamSlug],
+            }).catch((error) => {
+              if (error.status !== 422) throw error;
+            });
+
+            core.setFailed(`large-pr-exception requires review from @${owner}/${teamSlug}.`);
