@@ -121,22 +121,22 @@ jobs:
             NETWORK_CONFIG="awsvpcConfiguration={subnets=[${SUBNET_IDS}],assignPublicIp=DISABLED}"
           fi
 
-          # Build alembic prefix: include -c <ini> only when INI_FILE is set
+          # Build full alembic command array as JSON
           if [ -n "${INI_FILE}" ]; then
-            INI_ARGS=("-c" "${INI_FILE}")
+            CMD=$(jq -cn --arg ini "${INI_FILE}" '["alembic","-c",$ini]')
           else
-            INI_ARGS=()
+            CMD='["alembic"]'
           fi
 
           case "${MIGRATION_COMMAND}" in
             "upgrade head")
-              OVERRIDES=$(jq -cn --arg name "${CONTAINER_NAME}" --argjson ini "$(jq -cn '$ARGS.positional' --args -- "${INI_ARGS[@]}")" '{"containerOverrides":[{"name":$name,"command":["alembic"] + $ini + ["upgrade","head"]}]}')
+              SUFFIX='["upgrade","head"]'
               ;;
             "downgrade -1")
-              OVERRIDES=$(jq -cn --arg name "${CONTAINER_NAME}" --argjson ini "$(jq -cn '$ARGS.positional' --args -- "${INI_ARGS[@]}")" '{"containerOverrides":[{"name":$name,"command":["alembic"] + $ini + ["downgrade","-1"]}]}')
+              SUFFIX='["downgrade","-1"]'
               ;;
             "downgrade base")
-              OVERRIDES=$(jq -cn --arg name "${CONTAINER_NAME}" --argjson ini "$(jq -cn '$ARGS.positional' --args -- "${INI_ARGS[@]}")" '{"containerOverrides":[{"name":$name,"command":["alembic"] + $ini + ["downgrade","base"]}]}')
+              SUFFIX='["downgrade","base"]'
               ;;
             *)
               echo "ERROR: unsupported MIGRATION_COMMAND: ${MIGRATION_COMMAND}"
@@ -144,6 +144,10 @@ jobs:
               exit 1
               ;;
           esac
+
+          FULL_CMD=$(jq -cn --argjson a "${CMD}" --argjson b "${SUFFIX}" '$a + $b')
+          OVERRIDES=$(jq -cn --arg name "${CONTAINER_NAME}" --argjson cmd "${FULL_CMD}" \
+            '{"containerOverrides":[{"name":$name,"command":$cmd}]}')
 
           TASK_ARN=$(aws ecs run-task \
             --cluster "${ECS_CLUSTER_NAME}" \
