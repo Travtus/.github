@@ -29,6 +29,11 @@ on:
         required: false
         default: "upgrade head"
         description: "Supported Alembic command: upgrade head, downgrade -1, or downgrade base"
+      INI_FILE:
+        type: string
+        required: false
+        default: ""
+        description: "Alembic config file (e.g. alembic-workflows.ini). Omit to use default alembic.ini"
       AWS_REGION:
         type: string
         required: false
@@ -69,6 +74,11 @@ on:
           - "upgrade head"
           - "downgrade -1"
           - "downgrade base"
+      INI_FILE:
+        description: "Alembic config file (e.g. alembic-workflows.ini). Omit to use default alembic.ini"
+        required: false
+        default: ""
+        type: string
       AWS_REGION:
         description: "AWS region"
         required: false
@@ -97,6 +107,7 @@ jobs:
           AWS_REGION: ${{ inputs.AWS_REGION }}
           CONTAINER_NAME: ${{ inputs.CONTAINER_NAME }}
           ECS_CLUSTER_NAME: ${{ inputs.ECS_CLUSTER_NAME }}
+          INI_FILE: ${{ inputs.INI_FILE }}
           MIGRATION_COMMAND: ${{ inputs.MIGRATION_COMMAND }}
           SECURITY_GROUP_ID: ${{ inputs.SECURITY_GROUP_ID }}
           SUBNET_IDS: ${{ inputs.SUBNET_IDS }}
@@ -110,15 +121,22 @@ jobs:
             NETWORK_CONFIG="awsvpcConfiguration={subnets=[${SUBNET_IDS}],assignPublicIp=DISABLED}"
           fi
 
+          # Build alembic prefix: include -c <ini> only when INI_FILE is set
+          if [ -n "${INI_FILE}" ]; then
+            INI_ARGS=("-c" "${INI_FILE}")
+          else
+            INI_ARGS=()
+          fi
+
           case "${MIGRATION_COMMAND}" in
             "upgrade head")
-              OVERRIDES=$(jq -cn --arg name "${CONTAINER_NAME}" '{"containerOverrides":[{"name":$name,"command":["alembic","upgrade","head"]}]}')
+              OVERRIDES=$(jq -cn --arg name "${CONTAINER_NAME}" --argjson ini "$(jq -cn '$ARGS.positional' --args -- "${INI_ARGS[@]}")" '{"containerOverrides":[{"name":$name,"command":["alembic"] + $ini + ["upgrade","head"]}]}')
               ;;
             "downgrade -1")
-              OVERRIDES=$(jq -cn --arg name "${CONTAINER_NAME}" '{"containerOverrides":[{"name":$name,"command":["alembic","downgrade","-1"]}]}')
+              OVERRIDES=$(jq -cn --arg name "${CONTAINER_NAME}" --argjson ini "$(jq -cn '$ARGS.positional' --args -- "${INI_ARGS[@]}")" '{"containerOverrides":[{"name":$name,"command":["alembic"] + $ini + ["downgrade","-1"]}]}')
               ;;
             "downgrade base")
-              OVERRIDES=$(jq -cn --arg name "${CONTAINER_NAME}" '{"containerOverrides":[{"name":$name,"command":["alembic","downgrade","base"]}]}')
+              OVERRIDES=$(jq -cn --arg name "${CONTAINER_NAME}" --argjson ini "$(jq -cn '$ARGS.positional' --args -- "${INI_ARGS[@]}")" '{"containerOverrides":[{"name":$name,"command":["alembic"] + $ini + ["downgrade","base"]}]}')
               ;;
             *)
               echo "ERROR: unsupported MIGRATION_COMMAND: ${MIGRATION_COMMAND}"
