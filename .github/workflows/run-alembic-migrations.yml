@@ -146,10 +146,8 @@ jobs:
           esac
 
           FULL_CMD=$(jq -cn --argjson a "${CMD}" --argjson b "${SUFFIX}" '$a + $b')
-          # Override entryPoint to [] so the image's ENTRYPOINT is bypassed;
-          # the full alembic command goes in command instead.
           OVERRIDES=$(jq -cn --arg name "${CONTAINER_NAME}" --argjson cmd "${FULL_CMD}" \
-            '{"containerOverrides":[{"name":$name,"entryPoint":[],"command":$cmd}]}')
+            '{"containerOverrides":[{"name":$name,"command":$cmd}]}')
 
           TASK_ARN=$(aws ecs run-task \
             --cluster "${ECS_CLUSTER_NAME}" \
