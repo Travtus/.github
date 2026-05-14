@@ -95,11 +95,20 @@ jobs:
             exit 1
           fi
 
+      - name: Mint Platform Admin review token
+        id: platform-admin-token
+        if: ${{ env.HAS_LARGE_PR_EXCEPTION == 'true' }}
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.PLATFORM_ADMIN_APP_ID }}
+          private-key: ${{ secrets.PLATFORM_ADMIN_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
       - name: Require Platform Admin review for large PR exception
         if: ${{ env.HAS_LARGE_PR_EXCEPTION == 'true' }}
         uses: actions/github-script@v8
         with:
-          github-token: ${{ secrets.PLATFORM_ADMIN_REVIEW_TOKEN || github.token }}
+          github-token: ${{ steps.platform-admin-token.outputs.token }}
           script: |
             const teamSlug = 'platform-admin';
             const { owner, repo } = context.repo;
