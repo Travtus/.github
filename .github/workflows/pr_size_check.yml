@@ -102,7 +102,8 @@ jobs:
         with:
           app-id: ${{ vars.PLATFORM_ADMIN_APP_ID }}
           private-key: ${{ secrets.PLATFORM_ADMIN_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
+          # Scope token to the current repo only.
+          repositories: ${{ github.event.repository.name }}
 
       - name: Require Platform Admin review for large PR exception
         if: ${{ env.HAS_LARGE_PR_EXCEPTION == 'true' }}
