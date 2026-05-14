@@ -19,15 +19,20 @@ For other package management tools, like `pip`, `poetry`, you can use the `pypro
 
 ### `pr_size_check.yml` — PR size enforcement
 
-Fails a PR when the number of changed lines exceeds **700** (configurable in the workflow). Designed to keep PRs reviewable and aligned with trunk-based development.
+Fails a PR when the number of changed lines exceeds **750** (configurable in the workflow). Designed to keep PRs reviewable and aligned with trunk-based development.
 
-**Triggers:** `pull_request`, `workflow_call`
+**Triggers:** `pull_request`, `pull_request_review`
+
+Add the `large-pr-exception` label only when a PR cannot reasonably be split. When the label is present, the size failure is skipped. The workflow requests review from the Platform Admin team and fails until the current PR head has an approval from a member of that team.
+
+If the Platform Admin team membership is not readable by `GITHUB_TOKEN`, configure `PLATFORM_ADMIN_REVIEW_TOKEN` with access to read org team membership.
 
 **Excluded from the line count:**
 - `**/*.md`
 - `**/test/**`, `**/tests/**`, `**/unit_test/**`, `**/unit_tests/**`
 - `**/alembic*/**`
 - `**/open_api.yaml`
+- `**/requirements*.txt`
 - `uv.lock`
 - `pyproject.toml`
 - `.github/workflows/**`

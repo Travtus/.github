@@ -2,33 +2,40 @@ name: PR Size Check
 
 on:
   pull_request:
-  workflow_call:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   enforce-pr-size:
     name: Enforce PR line limit
     runs-on: ubuntu-latest
+    env:
+      BASE_REF: ${{ github.event.pull_request.base.ref }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PULL_NUMBER: ${{ github.event.pull_request.number }}
+      HAS_LARGE_PR_EXCEPTION: ${{ contains(github.event.pull_request.labels.*.name, 'large-pr-exception') }}
 
     steps:
       - name: Checkout PR HEAD
         uses: actions/checkout@v6
         with:
-          # github.sha is the base tip for pull_request_target, so pin to head.
-          ref: ${{ github.event.pull_request.head.sha }}
+          # Pin to the PR head so review events diff the same commit under review.
+          ref: ${{ env.HEAD_SHA }}
           fetch-depth: 0
 
       - name: Fetch base branch
         shell: bash
         run: |
           set -euo pipefail
-          git fetch origin "${{ github.base_ref }}" --depth=1 \
-            || git fetch origin "${{ github.base_ref }}"
+          git fetch origin "$BASE_REF" --depth=1 || git fetch origin "$BASE_REF"
 
-          if ! git rev-parse --verify "origin/${{ github.base_ref }}" > /dev/null 2>&1; then
-            echo "::error::Could not resolve base branch 'origin/${{ github.base_ref }}'."
+          if ! git rev-parse --verify "origin/$BASE_REF" > /dev/null 2>&1; then
+            echo "::error::Could not resolve base branch 'origin/$BASE_REF'."
             exit 1
           fi
 
@@ -38,8 +45,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          BASE="origin/${{ github.base_ref }}"
-          HEAD="${{ github.event.pull_request.head.sha }}"
+          BASE="origin/$BASE_REF"
+          HEAD="$HEAD_SHA"
 
           # (glob) makes ** span zero or more segments (root + nested in one pattern);
           # (icase) folds .md/.MD and test/Test together.
@@ -52,6 +59,7 @@ jobs:
               ':(exclude,icase,glob)**/unit_tests/**' \
               ':(exclude,icase,glob)**/alembic*/**' \
               ':(exclude,glob)**/open_api.yaml' \
+              ':(exclude,glob)**/requirements*.txt' \
               ':(exclude,glob)uv.lock' \
               ':(exclude,glob)pyproject.toml' \
               ':(exclude,glob).github/workflows/**' |
@@ -67,22 +75,96 @@ jobs:
           )
 
           echo "changed_lines=$CHANGED_LINES" >> "$GITHUB_OUTPUT"
-          echo "Changed lines (excluding markdown, test folders, alembic folders, open_api.yaml, uv.lock, pyproject.toml, .github/workflows, and binary files): $CHANGED_LINES"
+          echo "Changed lines (excluding markdown, test folders, alembic folders, open_api.yaml, requirements files, uv.lock, pyproject.toml, .github/workflows, and binary files): $CHANGED_LINES"
 
       - name: Fail if PR exceeds limit
         # Skipped when the 'large-pr-exception' label is present on the PR.
-        if: ${{ !contains(github.event.pull_request.labels.*.name, 'large-pr-exception') }}
+        if: ${{ env.HAS_LARGE_PR_EXCEPTION != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
 
-          LIMIT=700
+          LIMIT=750
           ACTUAL="${{ steps.diff.outputs.changed_lines }}"
 
           echo "Limit: $LIMIT"
           echo "Actual: $ACTUAL"
 
           if [ "$ACTUAL" -gt "$LIMIT" ]; then
-            echo "::error::PR is too large: $ACTUAL changed lines (limit: $LIMIT, excluding markdown, test folders, alembic folders, open_api.yaml, uv.lock, pyproject.toml, .github/workflows, and binary files). Split this into smaller PRs"
+            echo "::error::PR is too large: $ACTUAL changed lines (limit: $LIMIT, excluding markdown, test folders, alembic folders, open_api.yaml, requirements files, uv.lock, pyproject.toml, .github/workflows, and binary files). Split this into smaller PRs"
             exit 1
           fi
+
+      - name: Require Platform Admin review for large PR exception
+        if: ${{ env.HAS_LARGE_PR_EXCEPTION == 'true' }}
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.PLATFORM_ADMIN_REVIEW_TOKEN || github.token }}
+          script: |
+            const teamSlug = 'platform-admin';
+            const { owner, repo } = context.repo;
+            const pull_number = process.env.PULL_NUMBER;
+            const headSha = process.env.HEAD_SHA;
+
+            let teamMembers;
+
+            try {
+              teamMembers = await github.paginate(github.rest.teams.listMembersInOrg, {
+                org: owner,
+                team_slug: teamSlug,
+              });
+            } catch (error) {
+              core.setFailed(`Could not read @${owner}/${teamSlug} members. Ensure this workflow token can read org team membership.`);
+              return;
+            }
+
+            const platformAdminLogins = new Set(
+              teamMembers.map((member) => member.login.toLowerCase()),
+            );
+
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner,
+              repo,
+              pull_number,
+            });
+
+            const latestPlatformAdminReviews = new Map();
+            const reviewDecisionStates = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED']);
+
+            for (const review of reviews) {
+              const login = review.user?.login?.toLowerCase();
+
+              if (
+                !login ||
+                !platformAdminLogins.has(login) ||
+                review.commit_id !== headSha ||
+                !reviewDecisionStates.has(review.state)
+              ) {
+                continue;
+              }
+
+              const previous = latestPlatformAdminReviews.get(login);
+
+              if (!previous || new Date(review.submitted_at) > new Date(previous.submitted_at)) {
+                latestPlatformAdminReviews.set(login, review);
+              }
+            }
+
+            const approvedBy = [...latestPlatformAdminReviews.values()].find((review) => {
+              return review.state === 'APPROVED';
+            });
+
+            if (approvedBy) {
+              return;
+            }
+
+            await github.rest.pulls.requestReviewers({
+              owner,
+              repo,
+              pull_number,
+              team_reviewers: [teamSlug],
+            }).catch((error) => {
+              if (error.status !== 422) throw error;
+            });
+
+            core.setFailed(`large-pr-exception requires approval from a member of @${owner}/${teamSlug}.`);
