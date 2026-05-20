@@ -256,7 +256,7 @@ jobs:
           echo "Migration completed successfully"
 
       - name: Deregister temp task definition
-        if: ${{ inputs.ECR_REPO_NAME != '' }}
+        if: ${{ always() && inputs.ECR_REPO_NAME != '' }}
         env:
           AWS_REGION: ${{ inputs.AWS_REGION }}
           TEMP_TD_ARN: ${{ steps.run-task.outputs.temp_td_arn }}
