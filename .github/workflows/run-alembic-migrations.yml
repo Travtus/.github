@@ -38,6 +38,11 @@ on:
         type: string
         required: false
         default: "us-east-2"
+      ECR_REPO_NAME:
+        type: string
+        required: false
+        default: ""
+        description: "ECR repo name (e.g. travtus-workflows). When set, clones TASK_DEF family, swaps image to :latest from this repo, registers temp TD, runs migration with it, then deregisters. Use to migrate with newly-pushed image before service rollout."
     secrets:
       AWS_OIDC_ROLE_ARN:
         required: true
@@ -84,6 +89,11 @@ on:
         required: false
         default: "us-east-2"
         type: string
+      ECR_REPO_NAME:
+        description: "ECR repo name. When set, registers a temp TD with :latest image before running migration."
+        required: false
+        default: ""
+        type: string
 
 permissions:
   id-token: write
@@ -106,6 +116,7 @@ jobs:
         env:
           AWS_REGION: ${{ inputs.AWS_REGION }}
           CONTAINER_NAME: ${{ inputs.CONTAINER_NAME }}
+          ECR_REPO_NAME: ${{ inputs.ECR_REPO_NAME }}
           ECS_CLUSTER_NAME: ${{ inputs.ECS_CLUSTER_NAME }}
           INI_FILE: ${{ inputs.INI_FILE }}
           MIGRATION_COMMAND: ${{ inputs.MIGRATION_COMMAND }}
@@ -114,6 +125,26 @@ jobs:
           TASK_DEF: ${{ inputs.TASK_DEF }}
         run: |
           set -e
+
+          TEMP_TD=""
+          if [ -n "${ECR_REPO_NAME}" ]; then
+            ACCOUNT=$(aws sts get-caller-identity --query Account --output text --region "${AWS_REGION}")
+            NEW_IMAGE="${ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:latest"
+            echo "Registering temp TD with image: ${NEW_IMAGE}"
+            aws ecs describe-task-definition --task-definition "${TASK_DEF}" \
+              --query taskDefinition --region "${AWS_REGION}" > /tmp/td.json
+            jq --arg img "${NEW_IMAGE}" --arg cn "${CONTAINER_NAME}" \
+              'del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy,.deregisteredAt)
+               | (.containerDefinitions[] | select(.name==$cn) | .image) = $img' \
+              /tmp/td.json > /tmp/td.new.json
+            TASK_DEF=$(aws ecs register-task-definition --cli-input-json file:///tmp/td.new.json \
+              --region "${AWS_REGION}" --query 'taskDefinition.taskDefinitionArn' --output text)
+            TEMP_TD="${TASK_DEF}"
+            echo "Registered temp TD: ${TEMP_TD}"
+          fi
+
+          echo "temp_td_arn=${TEMP_TD}" >> "$GITHUB_OUTPUT"
+
           SG="${SECURITY_GROUP_ID}"
           if [ -n "${SG}" ]; then
             NETWORK_CONFIG="awsvpcConfiguration={subnets=[${SUBNET_IDS}],securityGroups=[${SG}],assignPublicIp=DISABLED}"
@@ -223,3 +254,15 @@ jobs:
           fi
 
           echo "Migration completed successfully"
+
+      - name: Deregister temp task definition
+        if: ${{ always() && inputs.ECR_REPO_NAME != '' }}
+        env:
+          AWS_REGION: ${{ inputs.AWS_REGION }}
+          TEMP_TD_ARN: ${{ steps.run-task.outputs.temp_td_arn }}
+        run: |
+          if [ -n "${TEMP_TD_ARN}" ]; then
+            aws ecs deregister-task-definition --task-definition "${TEMP_TD_ARN}" \
+              --region "${AWS_REGION}" >/dev/null
+            echo "Deregistered temp TD: ${TEMP_TD_ARN}"
+          fi
