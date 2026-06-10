@@ -26,7 +26,7 @@ Fails a PR when the number of changed lines exceeds **750** (configurable in the
 Add the `large-pr-exception` label only when a PR cannot reasonably be split. When the label is present, the size failure is skipped. The workflow requests review from the Platform Admin team and fails until the PR has an approval from a member of that team.
 Platform Admin approval is PR-scoped, not commit-scoped, so a subsequent rebase or synchronize event does not require a fresh approval unless that approval is dismissed or superseded by a later change-requested review from the same admin.
 
-If the Platform Admin team membership is not readable by `GITHUB_TOKEN`, configure `PLATFORM_ADMIN_REVIEW_TOKEN` with access to read org team membership.
+Configure the repository variable `PLATFORM_ADMIN_APP_ID` and secret `PLATFORM_ADMIN_APP_PRIVATE_KEY` for a GitHub App installation that can read org team membership and request PR reviewers.
 
 **Excluded from the line count:**
 - `**/*.md`
