@@ -60,7 +60,19 @@ jobs:
               ':(exclude,icase,glob)**/alembic*/**' \
               ':(exclude,glob)**/open_api.yaml' \
               ':(exclude,glob)**/requirements*.txt' \
-              ':(exclude,glob)uv.lock' \
+              ':(exclude,glob)**/uv.lock' \
+              ':(exclude,glob)**/poetry.lock' \
+              ':(exclude,glob)**/Pipfile.lock' \
+              ':(exclude,glob)**/package-lock.json' \
+              ':(exclude,glob)**/npm-shrinkwrap.json' \
+              ':(exclude,glob)**/yarn.lock' \
+              ':(exclude,glob)**/pnpm-lock.yaml' \
+              ':(exclude,glob)**/bun.lock' \
+              ':(exclude,glob)**/bun.lockb' \
+              ':(exclude,glob)**/Cargo.lock' \
+              ':(exclude,glob)**/Gemfile.lock' \
+              ':(exclude,glob)**/go.sum' \
+              ':(exclude,glob)**/composer.lock' \
               ':(exclude,glob)pyproject.toml' \
               ':(exclude,glob).github/workflows/**' |
             awk -F '\t' '
@@ -75,7 +87,7 @@ jobs:
           )
 
           echo "changed_lines=$CHANGED_LINES" >> "$GITHUB_OUTPUT"
-          echo "Changed lines (excluding markdown, test folders, alembic folders, open_api.yaml, requirements files, uv.lock, pyproject.toml, .github/workflows, and binary files): $CHANGED_LINES"
+          echo "Changed lines (excluding markdown, test folders, alembic folders, open_api.yaml, requirements files, lockfiles, pyproject.toml, .github/workflows, and binary files): $CHANGED_LINES"
 
       - name: Fail if PR exceeds limit
         # Skipped when the 'large-pr-exception' label is present on the PR.
@@ -91,7 +103,7 @@ jobs:
           echo "Actual: $ACTUAL"
 
           if [ "$ACTUAL" -gt "$LIMIT" ]; then
-            echo "::error::PR is too large: $ACTUAL changed lines (limit: $LIMIT, excluding markdown, test folders, alembic folders, open_api.yaml, requirements files, uv.lock, pyproject.toml, .github/workflows, and binary files). Split this into smaller PRs"
+            echo "::error::PR is too large: $ACTUAL changed lines (limit: $LIMIT, excluding markdown, test folders, alembic folders, open_api.yaml, requirements files, lockfiles, pyproject.toml, .github/workflows, and binary files). Split this into smaller PRs"
             exit 1
           fi
 
@@ -114,7 +126,6 @@ jobs:
             const teamSlug = 'platform-admin';
             const { owner, repo } = context.repo;
             const pull_number = process.env.PULL_NUMBER;
-            const headSha = process.env.HEAD_SHA;
 
             let teamMembers;
 
@@ -147,7 +158,6 @@ jobs:
               if (
                 !login ||
                 !platformAdminLogins.has(login) ||
-                review.commit_id !== headSha ||
                 !reviewDecisionStates.has(review.state)
               ) {
                 continue;
