@@ -43,8 +43,9 @@ Slack mentions use the selected GitHub user's public email from `GET /users/{use
 
 Before enabling the workflow:
 - Confirm Slack channel IDs in `.github/auto_reviewer_config.json`.
-- Create the state issue configured by `state_issue_number`.
-- Add one comment containing:
+- Use the configured state issue: `https://github.com/Travtus/.github/issues/70`.
+- If the workflow does not find the state comment, it creates one automatically.
+- To create it manually, add one comment containing:
 
 ````markdown
 <!-- auto-reviewer-state -->
