@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.error import HTTPError
-from urllib.parse import urlencode
 
 
 JsonDict = dict[str, Any]
@@ -74,10 +73,14 @@ class GithubClient:
             if error.code != 422:
                 raise
 
-    def get_public_email(self, username: str) -> str | None:
-        response = self._request_func("GET", f"/users/{username}", None)
-        email = response.get("email")
-        return email if isinstance(email, str) and email else None
+    def list_existing_reviewers(self, owner: str, repo: str, pull_number: int) -> list[str]:
+        response = self._request_func(
+            "GET",
+            f"/repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers",
+            None,
+        )
+        users = response.get("users", []) if isinstance(response, dict) else []
+        return [user["login"] for user in users]
 
     def _paginate(self, path: str) -> list[JsonDict]:
         page = 1
@@ -123,17 +126,6 @@ class GithubClient:
 class SlackClient:
     def __init__(self, token: str) -> None:
         self.token = token
-
-    def lookup_user_id_by_email(self, email: str) -> str | None:
-        query = urlencode({"email": email})
-        response = self._request("GET", f"/api/users.lookupByEmail?{query}")
-        if not response.get("ok"):
-            return None
-        user = response.get("user")
-        if not isinstance(user, dict):
-            return None
-        slack_id = user.get("id")
-        return slack_id if isinstance(slack_id, str) else None
 
     def post_message(self, channel: str, text: str) -> None:
         response = self._request(
@@ -205,14 +197,11 @@ class GithubApi(Protocol):
     def request_reviewer(self, owner: str, repo: str, pull_number: int, reviewer: str) -> None:
         pass
 
-    def get_public_email(self, username: str) -> str | None:
+    def list_existing_reviewers(self, owner: str, repo: str, pull_number: int) -> list[str]:
         pass
 
 
 class SlackApi(Protocol):
-    def lookup_user_id_by_email(self, email: str) -> str | None:
-        pass
-
     def post_message(self, channel: str, text: str) -> None:
         pass
 
@@ -304,6 +293,7 @@ class ReviewerAutomation:
         state_owner: str,
         state_repo: str,
         state_issue_number: int,
+        reviewer_slack_ids: dict[str, str] | None = None,
     ) -> None:
         self.github = github
         self.slack = slack
@@ -311,6 +301,9 @@ class ReviewerAutomation:
         self.state_owner = state_owner
         self.state_repo = state_repo
         self.state_issue_number = state_issue_number
+        self.reviewer_slack_ids = {
+            login.lower(): slack_id for login, slack_id in (reviewer_slack_ids or {}).items()
+        }
 
     def run(
         self,
@@ -326,6 +319,7 @@ class ReviewerAutomation:
             print("No reviewer team matched changed files.")
             return AutomationResult(assigned_reviewers={})
 
+        existing_reviewers = self.github.list_existing_reviewers(owner, repo, pull_number)
         state, comment_id, previous_body = self.github.get_state_comment(
             self.state_owner,
             self.state_repo,
@@ -337,7 +331,12 @@ class ReviewerAutomation:
             matched_teams,
             state,
             pr_author,
+            existing_reviewers,
         )
+        if not assigned_reviewers:
+            print("Every matched team already has a requested reviewer.")
+            return AutomationResult(assigned_reviewers={})
+
         self.github.update_state_comment(
             self.state_owner,
             self.state_repo,
@@ -362,16 +361,20 @@ class ReviewerAutomation:
         matched_teams: list[str],
         state: JsonDict,
         pr_author: str,
+        existing_reviewers: list[str],
     ) -> tuple[dict[str, str], JsonDict]:
+        existing_lower = {reviewer.lower() for reviewer in existing_reviewers}
         next_state = json.loads(json.dumps(state))
         assigned_reviewers = {}
         for team_name in matched_teams:
             team_config = self.config["teams"][team_name]
+            members = self.github.list_team_members(owner, team_config["github_team"])
+            if any(member.lower() in existing_lower for member in members):
+                continue
             team_state = next_state.setdefault(
                 team_name,
                 {"cursor": -1, "last_reviewer": None, "previous_order": [], "counts": {}},
             )
-            members = self.github.list_team_members(owner, team_config["github_team"])
             reviewer, updated_team_state = pick_round_robin_reviewer(members, team_state, pr_author)
             if reviewer is None:
                 raise RuntimeError(f"No eligible reviewer found for {team_name}.")
@@ -402,14 +405,9 @@ class ReviewerAutomation:
         pr_author: str,
         pr_url: str,
     ) -> None:
-        email = self.github.get_public_email(reviewer)
-        if email is None:
-            print(f"Skipping Slack mention for {reviewer}: GitHub public email is not set.")
-            return
-
-        slack_user_id = self.slack.lookup_user_id_by_email(email)
+        slack_user_id = self.reviewer_slack_ids.get(reviewer.lower())
         if slack_user_id is None:
-            print(f"Skipping Slack mention for {reviewer}: Slack user lookup failed.")
+            print(f"Skipping Slack mention for {reviewer}: no Slack id mapping.")
             return
 
         channel = self.config["teams"][team_name]["slack_channel"]
@@ -449,6 +447,7 @@ def main() -> int:
     state_repository = config.get("state_repository", "Travtus/.github")
     state_owner, state_repo = state_repository.split("/", maxsplit=1)
     state_issue_number = int(config["state_issue_number"])
+    reviewer_slack_ids = json.loads(os.environ.get("REVIEWER_SLACK_MAP") or "{}")
 
     automation = ReviewerAutomation(
         github=GithubClient(os.environ["GITHUB_TOKEN"]),
@@ -457,6 +456,7 @@ def main() -> int:
         state_owner=state_owner,
         state_repo=state_repo,
         state_issue_number=state_issue_number,
+        reviewer_slack_ids=reviewer_slack_ids,
     )
     result = automation.run(
         owner=owner,
