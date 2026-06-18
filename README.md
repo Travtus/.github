@@ -32,6 +32,8 @@ Mixed PRs receive one reviewer from each matching team. Reviewer selection is ro
 - `PLATFORM_ADMIN_APP_PRIVATE_KEY` repository or organization secret
 - `SLACK_BOT_TOKEN` repository or organization secret
 
+`PLATFORM_ADMIN_APP_ID` must contain the GitHub App **client ID** because `actions/create-github-app-token@v3` uses `client-id`.
+
 The GitHub App must be able to read team members, request PR reviewers, read issue comments, and update the state issue comment. Required permissions:
 - Repository `Pull requests`: read/write
 - Repository `Issues`: read/write
@@ -74,7 +76,7 @@ Add the `large-pr-exception` label only when a PR cannot reasonably be split. Wh
 The exception path does not wait or poll for approval, so it does not extend workflow runtime. If a later Platform Admin approval does not retrigger the required workflow, rerun the check or use a separate GitHub App/per-repo `pull_request_review` workflow to retrigger it.
 Platform Admin approval is PR-scoped, not commit-scoped, so a subsequent rebase or synchronize event does not require a fresh approval unless that approval is dismissed or superseded by a later change-requested review from the same admin.
 
-Configure the repository variable `PLATFORM_ADMIN_APP_ID` and secret `PLATFORM_ADMIN_APP_PRIVATE_KEY` for a GitHub App installation that can read org team membership and request PR reviewers.
+Configure the repository variable `PLATFORM_ADMIN_APP_ID` with the GitHub App client ID and secret `PLATFORM_ADMIN_APP_PRIVATE_KEY` for a GitHub App installation that can read org team membership and request PR reviewers.
 
 **Excluded from the line count:**
 - `**/*.md`

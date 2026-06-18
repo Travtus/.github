@@ -112,7 +112,7 @@ jobs:
         if: ${{ env.HAS_LARGE_PR_EXCEPTION == 'true' }}
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ vars.PLATFORM_ADMIN_APP_ID }}
+          client-id: ${{ vars.PLATFORM_ADMIN_APP_ID }}
           private-key: ${{ secrets.PLATFORM_ADMIN_APP_PRIVATE_KEY }}
           # Scope token to the current repo only.
           repositories: ${{ github.event.repository.name }}
