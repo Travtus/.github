@@ -1,6 +1,7 @@
 {
   "state_repository": "Travtus/.github",
   "state_issue_number": 70,
+  "default_team": "Platform",
   "teams": {
     "Platform": {
       "github_team": "Platform",

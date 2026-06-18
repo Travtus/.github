@@ -316,8 +316,9 @@ class ReviewerAutomation:
         changed_files = self.github.list_pull_request_files(owner, repo, pull_number)
         matched_teams = classify_files(changed_files, self.config)
         if not matched_teams:
-            print("No reviewer team matched changed files.")
-            return AutomationResult(assigned_reviewers={})
+            default_team = self.config.get("default_team", "Platform")
+            print(f"No reviewer team matched changed files; defaulting to {default_team}.")
+            matched_teams = [default_team]
 
         existing_reviewers = self.github.list_existing_reviewers(owner, repo, pull_number)
         state, comment_id, previous_body = self.github.get_state_comment(
