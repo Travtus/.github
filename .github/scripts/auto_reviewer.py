@@ -62,18 +62,23 @@ class GithubClient:
             {"body": next_body},
         )
 
-    def request_reviewer(self, owner: str, repo: str, pull_number: int, reviewer: str) -> None:
+    def request_reviewer(self, owner: str, repo: str, pull_number: int, reviewer: str) -> bool:
         try:
             self._request_func(
                 "POST",
                 f"/repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers",
                 {"reviewers": [reviewer]},
             )
+            return True
         except HTTPError as error:
             if error.code != 422:
                 raise
+            # 422 covers both "already requested" (idempotent) and validation errors
+            # such as an unrequestable reviewer. Confirm the reviewer is actually pending.
+            requested = self.list_requested_reviewers(owner, repo, pull_number)
+            return reviewer.lower() in {login.lower() for login in requested}
 
-    def list_existing_reviewers(self, owner: str, repo: str, pull_number: int) -> list[str]:
+    def list_requested_reviewers(self, owner: str, repo: str, pull_number: int) -> list[str]:
         response = self._request_func(
             "GET",
             f"/repos/{owner}/{repo}/pulls/{pull_number}/requested_reviewers",
@@ -81,6 +86,16 @@ class GithubClient:
         )
         users = response.get("users", []) if isinstance(response, dict) else []
         return [user["login"] for user in users]
+
+    def list_existing_reviewers(self, owner: str, repo: str, pull_number: int) -> list[str]:
+        # Pending requested reviewers plus anyone who already submitted a review; once a
+        # reviewer submits they drop off requested_reviewers, so reviews must be counted too.
+        requested = self.list_requested_reviewers(owner, repo, pull_number)
+        reviews = self._paginate(f"/repos/{owner}/{repo}/pulls/{pull_number}/reviews")
+        review_authors = [
+            review["user"]["login"] for review in reviews if isinstance(review.get("user"), dict)
+        ]
+        return list(dict.fromkeys(requested + review_authors))
 
     def _paginate(self, path: str) -> list[JsonDict]:
         page = 1
@@ -194,7 +209,7 @@ class GithubApi(Protocol):
     ) -> None:
         pass
 
-    def request_reviewer(self, owner: str, repo: str, pull_number: int, reviewer: str) -> None:
+    def request_reviewer(self, owner: str, repo: str, pull_number: int, reviewer: str) -> bool:
         pass
 
     def list_existing_reviewers(self, owner: str, repo: str, pull_number: int) -> list[str]:
@@ -327,15 +342,25 @@ class ReviewerAutomation:
             self.state_issue_number,
             STATE_COMMENT_MARKER,
         )
-        assigned_reviewers, next_state = self._select_reviewers(
-            owner,
-            matched_teams,
-            state,
-            pr_author,
-            existing_reviewers,
+        selections = self._select_reviewers(
+            owner, matched_teams, state, pr_author, existing_reviewers
         )
-        if not assigned_reviewers:
-            print("Every matched team already has a requested reviewer.")
+        if not selections:
+            print("Every matched team already has a reviewer.")
+            return AutomationResult(assigned_reviewers={})
+
+        # Request each reviewer first; only advance state and notify Slack for the ones
+        # GitHub actually accepted, so a rejected request never skews the round-robin.
+        next_state = json.loads(json.dumps(state))
+        confirmed_reviewers = {}
+        for team_name, (reviewer, team_state) in selections.items():
+            if not self.github.request_reviewer(owner, repo, pull_number, reviewer):
+                print(f"GitHub did not accept {reviewer} for {team_name}; skipping.")
+                continue
+            next_state[team_name] = team_state
+            confirmed_reviewers[team_name] = reviewer
+
+        if not confirmed_reviewers:
             return AutomationResult(assigned_reviewers={})
 
         self.github.update_state_comment(
@@ -346,15 +371,9 @@ class ReviewerAutomation:
             previous_body,
             STATE_COMMENT_MARKER,
         )
-        self._request_reviews_and_notify(
-            owner,
-            repo,
-            pull_number,
-            pr_author,
-            pr_url,
-            assigned_reviewers,
-        )
-        return AutomationResult(assigned_reviewers=assigned_reviewers)
+        for team_name, reviewer in confirmed_reviewers.items():
+            self._notify_slack(team_name, reviewer, owner, repo, pull_number, pr_author, pr_url)
+        return AutomationResult(assigned_reviewers=confirmed_reviewers)
 
     def _select_reviewers(
         self,
@@ -363,38 +382,23 @@ class ReviewerAutomation:
         state: JsonDict,
         pr_author: str,
         existing_reviewers: list[str],
-    ) -> tuple[dict[str, str], JsonDict]:
+    ) -> dict[str, tuple[str, JsonDict]]:
         existing_lower = {reviewer.lower() for reviewer in existing_reviewers}
-        next_state = json.loads(json.dumps(state))
-        assigned_reviewers = {}
+        selections: dict[str, tuple[str, JsonDict]] = {}
         for team_name in matched_teams:
             team_config = self.config["teams"][team_name]
             members = self.github.list_team_members(owner, team_config["github_team"])
             if any(member.lower() in existing_lower for member in members):
                 continue
-            team_state = next_state.setdefault(
+            team_state = state.get(
                 team_name,
                 {"cursor": -1, "last_reviewer": None, "previous_order": [], "counts": {}},
             )
             reviewer, updated_team_state = pick_round_robin_reviewer(members, team_state, pr_author)
             if reviewer is None:
                 raise RuntimeError(f"No eligible reviewer found for {team_name}.")
-            assigned_reviewers[team_name] = reviewer
-            next_state[team_name] = updated_team_state
-        return assigned_reviewers, next_state
-
-    def _request_reviews_and_notify(
-        self,
-        owner: str,
-        repo: str,
-        pull_number: int,
-        pr_author: str,
-        pr_url: str,
-        assigned_reviewers: dict[str, str],
-    ) -> None:
-        for team_name, reviewer in assigned_reviewers.items():
-            self.github.request_reviewer(owner, repo, pull_number, reviewer)
-            self._notify_slack(team_name, reviewer, owner, repo, pull_number, pr_author, pr_url)
+            selections[team_name] = (reviewer, updated_team_state)
+        return selections
 
     def _notify_slack(
         self,
