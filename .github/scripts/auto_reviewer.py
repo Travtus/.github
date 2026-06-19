@@ -416,10 +416,6 @@ def main() -> int:
         )
         return 1
 
-    if os.environ.get("PR_DRAFT", "false").lower() == "true":
-        print("PR is in draft status; skipping reviewer assignment.")
-        return 0
-
     owner, repo = os.environ["GITHUB_REPOSITORY"].split("/", maxsplit=1)
     script_dir = Path(__file__).resolve().parent
     config = load_json(script_dir.parent / "auto_reviewer_config.json")
