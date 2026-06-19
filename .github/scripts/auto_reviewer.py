@@ -254,49 +254,19 @@ def pick_round_robin_reviewer(
     state: JsonDict,
     pr_author: str,
 ) -> tuple[str | None, JsonDict]:
-    ordered_members = sorted(members, key=str.lower)
-    eligible_members = [member for member in ordered_members if member.lower() != pr_author.lower()]
+    eligible_members = [member for member in members if member.lower() != pr_author.lower()]
     if not eligible_members:
         return None, state
 
-    start_index = _start_index(ordered_members, state)
-
-    for offset in range(1, len(ordered_members) + 1):
-        next_index = (start_index + offset) % len(ordered_members)
-        reviewer = ordered_members[next_index]
-        if reviewer in eligible_members:
-            counts = dict(state.get("counts", {}))
-            counts[reviewer] = int(counts.get(reviewer, 0)) + 1
-            return reviewer, {
-                "cursor": next_index,
-                "last_reviewer": reviewer,
-                "previous_order": ordered_members,
-                "counts": counts,
-            }
-
-    return None, state
-
-
-def _start_index(ordered_members: list[str], state: JsonDict) -> int:
+    counts = {member: int(state.get("counts", {}).get(member, 0)) for member in members}
     last_reviewer = state.get("last_reviewer")
-    if isinstance(last_reviewer, str) and last_reviewer in ordered_members:
-        return ordered_members.index(last_reviewer)
-
-    previous_order = state.get("previous_order")
-    if not isinstance(previous_order, list) or not isinstance(last_reviewer, str):
-        return -1
-
-    previous_active_members = [member for member in previous_order if member in ordered_members]
-    if last_reviewer not in previous_order or not previous_active_members:
-        return -1
-
-    previous_index = previous_order.index(last_reviewer)
-    for offset in range(1, len(previous_order) + 1):
-        candidate = previous_order[(previous_index + offset) % len(previous_order)]
-        if candidate in ordered_members:
-            return ordered_members.index(candidate) - 1
-
-    return -1
+    # Fewest past assignments wins; break ties by avoiding back-to-back picks, then by name.
+    reviewer = min(
+        eligible_members,
+        key=lambda member: (counts[member], member == last_reviewer, member.lower()),
+    )
+    counts[reviewer] += 1
+    return reviewer, {"last_reviewer": reviewer, "counts": counts}
 
 
 class ReviewerAutomation:
@@ -392,7 +362,7 @@ class ReviewerAutomation:
                 continue
             team_state = state.get(
                 team_name,
-                {"cursor": -1, "last_reviewer": None, "previous_order": [], "counts": {}},
+                {"last_reviewer": None, "counts": {}},
             )
             reviewer, updated_team_state = pick_round_robin_reviewer(members, team_state, pr_author)
             if reviewer is None:
