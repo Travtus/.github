@@ -1,0 +1,45 @@
+name: Assign PR reviewers round robin
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auto-reviewer-round-robin
+  cancel-in-progress: false
+
+jobs:
+  assign-reviewers:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint reviewer app token
+        id: reviewer-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.PLATFORM_ADMIN_APP_ID }}
+          private-key: ${{ secrets.PLATFORM_ADMIN_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Checkout central automation
+        uses: actions/checkout@v6
+        with:
+          repository: Travtus/.github
+          ref: ${{ github.workflow_sha }}
+          token: ${{ steps.reviewer-token.outputs.token }}
+          path: github-automation
+
+      - name: Assign reviewer and notify Slack
+        run: python github-automation/.github/scripts/auto_reviewer.py
+        env:
+          GITHUB_TOKEN: ${{ steps.reviewer-token.outputs.token }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          REVIEWER_SLACK_MAP: ${{ secrets.REVIEWER_SLACK_MAP }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_URL: ${{ github.event.pull_request.html_url }}

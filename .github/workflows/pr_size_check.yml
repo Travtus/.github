@@ -112,7 +112,7 @@ jobs:
         if: ${{ env.HAS_LARGE_PR_EXCEPTION == 'true' }}
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ vars.PLATFORM_ADMIN_APP_ID }}
+          client-id: ${{ vars.PLATFORM_ADMIN_APP_ID }}
           private-key: ${{ secrets.PLATFORM_ADMIN_APP_PRIVATE_KEY }}
           # Scope token to the current repo only.
           repositories: ${{ github.event.repository.name }}
@@ -143,6 +143,16 @@ jobs:
               teamMembers.map((member) => member.login.toLowerCase()),
             );
 
+            await github.rest.pulls.requestReviewers({
+              owner,
+              repo,
+              pull_number,
+              team_reviewers: [teamSlug],
+            }).catch((error) => {
+              if (error.status !== 422) throw error;
+            });
+
+            const reviewDecisionStates = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED']);
             const reviews = await github.paginate(github.rest.pulls.listReviews, {
               owner,
               repo,
@@ -150,7 +160,6 @@ jobs:
             });
 
             const latestPlatformAdminReviews = new Map();
-            const reviewDecisionStates = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED']);
 
             for (const review of reviews) {
               const login = review.user?.login?.toLowerCase();
@@ -177,14 +186,5 @@ jobs:
             if (approvedBy) {
               return;
             }
-
-            await github.rest.pulls.requestReviewers({
-              owner,
-              repo,
-              pull_number,
-              team_reviewers: [teamSlug],
-            }).catch((error) => {
-              if (error.status !== 422) throw error;
-            });
 
             core.setFailed(`large-pr-exception requires approval from a member of @${owner}/${teamSlug}.`);

@@ -1,0 +1,17 @@
+{
+  "state_repository": "Travtus/.github",
+  "state_issue_number": 70,
+  "default_team": "Platform",
+  "teams": {
+    "Platform": {
+      "github_team": "Platform",
+      "slack_channel": "C0A035FRREE",
+      "extensions": [".py", ".yaml", ".yml", ".sql"]
+    },
+    "frontend": {
+      "github_team": "frontend",
+      "slack_channel": "C0A035FRREE",
+      "extensions": [".ts", ".tsx", ".js", ".jsx", ".css", ".scss"]
+    }
+  }
+}
