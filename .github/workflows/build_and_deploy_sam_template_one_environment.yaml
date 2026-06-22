@@ -38,7 +38,7 @@ env:
 
 jobs:
   build-and-deploy:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.ARM_SUPPORT && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -53,9 +53,6 @@ jobs:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           role-session-name: samplerolesession
           aws-region: us-east-2
-      - name: Settings to support ARM Build
-        if: ${{ inputs.ARM_SUPPORT }}
-        run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
       - name: Validate template
         run: sam validate --template-file ${{ inputs.TEMPLATE_NAME }}
       - name: Build SAM

@@ -55,7 +55,7 @@ env:
 
 jobs:
   deploy-dev:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.ARM_SUPPORT && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     if: ${{ inputs.ENVIRONMENTS == 'dev' || inputs.ENVIRONMENTS == 'all' }}
     steps:
       - uses: actions/checkout@v7
@@ -71,9 +71,6 @@ jobs:
           role-to-assume: ${{ secrets.AWS_DEV_OIDC_ROLE_ARN }}
           role-session-name: samplerolesession
           aws-region: us-east-2
-      - name: Settings to support ARM Build
-        if: ${{ inputs.ARM_SUPPORT }}
-        run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
       - name: Validate template
         run: sam validate --template-file ${{ inputs.TEMPLATE_NAME }}
       - name: Build SAM
@@ -81,7 +78,7 @@ jobs:
       - name: Deploy SAM template
         run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.DEV_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset --resolve-image-repos
   deploy-qa:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.ARM_SUPPORT && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     needs: [deploy-dev]
     if: >
       ${{ always() &&
@@ -101,9 +98,6 @@ jobs:
           role-to-assume: ${{ secrets.AWS_QA_OIDC_ROLE_ARN }}
           role-session-name: samplerolesession
           aws-region: us-east-2
-      - name: Settings to support ARM Build
-        if: ${{ inputs.ARM_SUPPORT }}
-        run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
       - name: Validate template
         run: sam validate --template-file ${{ inputs.TEMPLATE_NAME }}
       - name: Build SAM
@@ -111,7 +105,7 @@ jobs:
       - name: Deploy SAM template
         run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.QA_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset --resolve-image-repos
   deploy-uat:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.ARM_SUPPORT && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     needs: [deploy-qa]
     if: >
       ${{ always() &&
@@ -131,9 +125,6 @@ jobs:
           role-to-assume: ${{ secrets.AWS_UAT_OIDC_ROLE_ARN }}
           role-session-name: samplerolesession
           aws-region: us-east-2
-      - name: Settings to support ARM Build
-        if: ${{ inputs.ARM_SUPPORT }}
-        run: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
       - name: Validate template
         run: sam validate --template-file ${{ inputs.TEMPLATE_NAME }}
       - name: Build SAM
