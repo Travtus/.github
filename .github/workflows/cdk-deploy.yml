@@ -1,0 +1,79 @@
+name: Provision infrastructure with CDK
+
+# Universal provisioning step: `cdk deploy` for any repo's infra — RDS, DynamoDB,
+# Lambda (code shipped here), ECR, ECS cluster/service/task-def, S3, etc.
+# cdk synth runs the in-code cdk-nag (AwsSolutions) SOC2 checks and fails on
+# violations before any deploy.
+
+on:
+  workflow_call:
+    secrets:
+      PAT_GITHUB:
+        required: true
+      AWS_OIDC_ROLE_ARN:
+        required: true
+    inputs:
+      ENV:
+        type: string
+        required: true
+        description: "Environment passed to the CDK app as `-c env=<ENV>` (dev/qa/uat/prod)."
+      CDK_STACKS:
+        type: string
+        required: false
+        default: "--all"
+        description: "Stack selector(s) for cdk deploy. Defaults to all stacks in the app."
+      WORKING_DIRECTORY:
+        type: string
+        required: false
+        default: "."
+        description: "Directory containing cdk.json."
+      PYTHON_VERSION:
+        type: string
+        required: false
+        default: "3.13"
+      NODE_VERSION:
+        type: string
+        required: false
+        default: "20"
+      AWS_REGION:
+        type: string
+        required: false
+        default: "us-east-2"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.WORKING_DIRECTORY }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ env.GITHUB_TOKEN }}
+      - uses: astral-sh/setup-uv@v8.2.0
+        with:
+          python-version: ${{ inputs.PYTHON_VERSION }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.NODE_VERSION }}
+      - name: Install AWS CDK CLI
+        run: npm install -g aws-cdk
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          role-session-name: cdk-deploy
+          aws-region: ${{ inputs.AWS_REGION }}
+      - name: Install dependencies
+        run: uv sync
+      - name: CDK synth (runs cdk-nag SOC2 checks)
+        run: cdk synth -c env=${{ inputs.ENV }}
+      - name: CDK deploy
+        run: cdk deploy ${{ inputs.CDK_STACKS }} -c env=${{ inputs.ENV }} --require-approval never
