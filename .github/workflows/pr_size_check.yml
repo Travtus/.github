@@ -22,7 +22,7 @@ jobs:
 
     steps:
       - name: Checkout PR HEAD
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Pin to the PR head so review events diff the same commit under review.
           ref: ${{ env.HEAD_SHA }}

@@ -31,8 +31,8 @@ jobs:
       matrix:
         python-version: ["3.8"]
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.8'
       - run: |
@@ -45,7 +45,7 @@ jobs:
           cd ./venv/lib/python3.8/site-packages
           zip -r -q ${{ inputs.PACKAGE_NAME }}.zip ${{ inputs.PACKAGE_NAME }}
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.OIDC_ROLE_ARN }}
           role-session-name: samplerolesession

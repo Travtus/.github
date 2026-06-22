@@ -58,15 +58,15 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ inputs.ENVIRONMENTS == 'dev' || inputs.ENVIRONMENTS == 'all' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ inputs.PYTHON_VERSION }}
-      - uses: aws-actions/setup-sam@v2
+      - uses: aws-actions/setup-sam@v3
         with:
           use-installer: true
       - name: Configure AWS credentials for DEV
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_DEV_OIDC_ROLE_ARN }}
           role-session-name: samplerolesession
@@ -88,15 +88,15 @@ jobs:
           (inputs.ENVIRONMENTS == 'qa' || inputs.ENVIRONMENTS == 'all') &&
           (needs.deploy-dev.result == 'success' || needs.deploy-dev.result == 'skipped') }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ inputs.PYTHON_VERSION }}
-      - uses: aws-actions/setup-sam@v2
+      - uses: aws-actions/setup-sam@v3
         with:
           use-installer: true
       - name: Configure AWS credentials for QA
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_QA_OIDC_ROLE_ARN }}
           role-session-name: samplerolesession
@@ -118,15 +118,15 @@ jobs:
           (inputs.ENVIRONMENTS == 'uat' || inputs.ENVIRONMENTS == 'all') &&
           (needs.deploy-qa.result == 'success' || needs.deploy-qa.result == 'skipped') }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ inputs.PYTHON_VERSION }}
-      - uses: aws-actions/setup-sam@v2
+      - uses: aws-actions/setup-sam@v3
         with:
           use-installer: true
       - name: Configure AWS credentials for UAT
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_UAT_OIDC_ROLE_ARN }}
           role-session-name: samplerolesession

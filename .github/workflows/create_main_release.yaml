@@ -19,7 +19,7 @@ jobs:
     outputs:
       new-tag: ${{ steps.get_new_tag.outputs.latest-tag}}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
       - uses: octokit/request-action@v2.x
         id: get_latest_release_info
         with:
