@@ -1,12 +1,5 @@
 name: Deploy (CDK provision + optional container release)
 
-# Standard deploy entry point for every repo, whatever its shape:
-#   - DynamoDB+Lambda / RDS / serverless  -> DEPLOY_CONTAINER=false (cdk deploy only)
-#   - ECR+ECS, no migrations              -> DEPLOY_CONTAINER=true,  RUN_MIGRATIONS=false
-#   - everything                          -> DEPLOY_CONTAINER=true,  RUN_MIGRATIONS=true
-# CDK provisions all resources (incl. ECR/ECS). The container path then builds
-# the image, pushes to the CDK-provisioned ECR, runs migrations, and rolls ECS.
-
 on:
   workflow_call:
     secrets:
@@ -51,7 +44,6 @@ on:
         required: false
         default: false
         description: "Run Alembic migrations (with the new image) before the ECS rollout."
-      # --- container release passthrough (only used when DEPLOY_CONTAINER) ---
       ECR_REPO_NAME:
         type: string
         required: false

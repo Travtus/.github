@@ -1,10 +1,5 @@
 name: Provision infrastructure with CDK
 
-# Universal provisioning step: `cdk deploy` for any repo's infra — RDS, DynamoDB,
-# Lambda (code shipped here), ECR, ECS cluster/service/task-def, S3, etc.
-# cdk synth runs the in-code cdk-nag (AwsSolutions) SOC2 checks and fails on
-# violations before any deploy.
-
 on:
   workflow_call:
     secrets:
