@@ -1,0 +1,131 @@
+name: Deploy (CDK provision + optional container release)
+
+on:
+  workflow_call:
+    secrets:
+      PAT_GITHUB:
+        required: true
+      AWS_OIDC_ROLE_ARN:
+        required: true
+      AWS_ACCOUNT:
+        required: false
+        description: "Required only when DEPLOY_CONTAINER is true (ECR login/push)."
+    inputs:
+      ENV:
+        type: string
+        required: true
+      CDK_STACKS:
+        type: string
+        required: false
+        default: "--all"
+      WORKING_DIRECTORY:
+        type: string
+        required: false
+        default: "."
+      PYTHON_VERSION:
+        type: string
+        required: false
+        default: "3.13"
+      NODE_VERSION:
+        type: string
+        required: false
+        default: "20"
+      AWS_REGION:
+        type: string
+        required: false
+        default: "us-east-2"
+      DEPLOY_CONTAINER:
+        type: boolean
+        required: false
+        default: false
+        description: "Build+push image and roll the ECS service after provisioning."
+      RUN_MIGRATIONS:
+        type: boolean
+        required: false
+        default: false
+        description: "Run Alembic migrations (with the new image) before the ECS rollout."
+      ECR_REPO_NAME:
+        type: string
+        required: false
+        default: ""
+      DOCKER_CONTEXT:
+        type: string
+        required: false
+        default: "."
+      ECS_CLUSTER_NAME:
+        type: string
+        required: false
+        default: ""
+      TASK_DEF:
+        type: string
+        required: false
+        default: ""
+      CONTAINER_NAME:
+        type: string
+        required: false
+        default: ""
+      SUBNET_IDS:
+        type: string
+        required: false
+        default: ""
+      SECURITY_GROUP_ID:
+        type: string
+        required: false
+        default: ""
+      MIGRATION_COMMAND:
+        type: string
+        required: false
+        default: "upgrade head"
+
+jobs:
+  provision:
+    uses: ./.github/workflows/cdk-deploy.yml
+    secrets:
+      PAT_GITHUB: ${{ secrets.PAT_GITHUB }}
+      AWS_OIDC_ROLE_ARN: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+    with:
+      ENV: ${{ inputs.ENV }}
+      CDK_STACKS: ${{ inputs.CDK_STACKS }}
+      WORKING_DIRECTORY: ${{ inputs.WORKING_DIRECTORY }}
+      PYTHON_VERSION: ${{ inputs.PYTHON_VERSION }}
+      NODE_VERSION: ${{ inputs.NODE_VERSION }}
+      AWS_REGION: ${{ inputs.AWS_REGION }}
+
+  build:
+    needs: provision
+    if: ${{ inputs.DEPLOY_CONTAINER }}
+    uses: ./.github/workflows/build_and_deploy_docker_to_ecr.yaml
+    secrets:
+      PAT_GITHUB: ${{ secrets.PAT_GITHUB }}
+      AWS_OIDC_ROLE_ARN: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+      AWS_ACCOUNT: ${{ secrets.AWS_ACCOUNT }}
+    with:
+      AWS_REGION: ${{ inputs.AWS_REGION }}
+      ECR_REPO_NAME: ${{ inputs.ECR_REPO_NAME }}
+      DOCKER_CONTEXT: ${{ inputs.DOCKER_CONTEXT }}
+
+  migrate:
+    needs: build
+    if: ${{ inputs.DEPLOY_CONTAINER && inputs.RUN_MIGRATIONS }}
+    uses: ./.github/workflows/run-alembic-migrations.yml
+    secrets:
+      AWS_OIDC_ROLE_ARN: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+    with:
+      ECS_CLUSTER_NAME: ${{ inputs.ECS_CLUSTER_NAME }}
+      TASK_DEF: ${{ inputs.TASK_DEF }}
+      CONTAINER_NAME: ${{ inputs.CONTAINER_NAME }}
+      SUBNET_IDS: ${{ inputs.SUBNET_IDS }}
+      SECURITY_GROUP_ID: ${{ inputs.SECURITY_GROUP_ID }}
+      MIGRATION_COMMAND: ${{ inputs.MIGRATION_COMMAND }}
+      AWS_REGION: ${{ inputs.AWS_REGION }}
+      ECR_REPO_NAME: ${{ inputs.ECR_REPO_NAME }}
+
+  restart:
+    needs: [build, migrate]
+    if: ${{ always() && inputs.DEPLOY_CONTAINER && needs.build.result == 'success' && (needs.migrate.result == 'success' || needs.migrate.result == 'skipped') }}
+    uses: ./.github/workflows/restart-ecs-services-template.yaml
+    secrets:
+      AWS_OIDC_ROLE_ARN: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+    with:
+      ECS_CLUSTER_NAME: ${{ inputs.ECS_CLUSTER_NAME }}
+      AWS_REGION: ${{ inputs.AWS_REGION }}

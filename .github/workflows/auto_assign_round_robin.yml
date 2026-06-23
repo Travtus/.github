@@ -27,7 +27,7 @@ jobs:
           owner: ${{ github.repository_owner }}
 
       - name: Checkout central automation
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: Travtus/.github
           ref: ${{ github.workflow_sha }}

@@ -117,11 +117,11 @@ jobs:
           CLICKHOUSE_USER: default
           CLICKHOUSE_PASSWORD: mypassword
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           token: ${{ env.GITHUB_TOKEN }}
       - name: Set up Python ${{ inputs.PYTHON_VERSION }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ inputs.PYTHON_VERSION }}
       - name: Install clickhouse-client
@@ -130,7 +130,7 @@ jobs:
           sudo apt update
           sudo apt install -y clickhouse-client
       - name: Get file changes
-        uses: dorny/paths-filter@v2
+        uses: dorny/paths-filter@v4
         id: filter
         with:
           list-files: shell
