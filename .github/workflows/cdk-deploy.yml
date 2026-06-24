@@ -2,11 +2,12 @@ name: Provision infrastructure with CDK
 
 on:
   workflow_call:
-    secrets:
-      PAT_GITHUB:
-        required: true
-      AWS_OIDC_ROLE_ARN:
-        required: true
+    # No secrets declared: callers use `secrets: inherit`. AWS_OIDC_ROLE_ARN is
+    # resolved from the ENV GitHub Environment (per-account role); the org secret
+    # PLATFORM_ADMIN_APP_PRIVATE_KEY + org var PLATFORM_ADMIN_APP_ID mint a scoped
+    # token for private git deps — no long-lived PAT.
+    # BREAKING: callers that previously passed secrets explicitly (PAT_GITHUB,
+    # AWS_OIDC_ROLE_ARN) must switch to `secrets: inherit`.
     inputs:
       ENV:
         type: string
@@ -39,13 +40,15 @@ on:
         type: string
         required: false
         default: "us-east-2"
+      DEP_REPOS:
+        type: string
+        required: false
+        default: "platform-infra-toolkit"
+        description: "Private repo(s) the App token may read for uv sync (newline/space separated)."
 
 permissions:
   id-token: write
   contents: read
-
-env:
-  GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
 
 jobs:
   provision:
@@ -61,8 +64,6 @@ jobs:
         working-directory: ${{ inputs.WORKING_DIRECTORY }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          token: ${{ env.GITHUB_TOKEN }}
       - uses: astral-sh/setup-uv@v8.2.0
         with:
           python-version: ${{ inputs.PYTHON_VERSION }}
@@ -77,6 +78,17 @@ jobs:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           role-session-name: cdk-deploy
           aws-region: ${{ inputs.AWS_REGION }}
+      - name: Mint App token for private dependencies
+        id: dep-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.PLATFORM_ADMIN_APP_ID }}
+          private-key: ${{ secrets.PLATFORM_ADMIN_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.DEP_REPOS }}
+      - name: Authenticate private git dependencies
+        # Global so uv's own fetches use it; rewrites the URL the lockfile pins.
+        run: git config --global url."https://x-access-token:${{ steps.dep-token.outputs.token }}@github.com/".insteadOf "ssh://git@github.com/"
       - name: Install dependencies
         run: uv sync
       - name: CDK synth (runs cdk-nag SOC2 checks)
