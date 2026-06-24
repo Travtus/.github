@@ -4,15 +4,18 @@ name: CDK CI (lint, types, synth)
 # `cdk synth` per environment (which runs the construct library's cdk-nag SOC2
 # checks and fails on findings). Companion to cdk-deploy.yml. Callers add the
 # pull_request/push triggers.
+#
+# Private Travtus git deps (e.g. platform-infra-toolkit) are resolved by minting
+# a short-lived, repo-scoped token from the platform-admin GitHub App — same
+# pattern as pr_size_check.yml. The App must be installed on the dependency repo
+# with contents:read. No long-lived PAT.
 
 on:
   workflow_call:
     secrets:
-      PAT_GITHUB:
+      PLATFORM_ADMIN_APP_PRIVATE_KEY:
         required: true
-        # Needed for `uv sync` to resolve private Travtus git dependencies
-        # (e.g. platform-infra-toolkit). The default GITHUB_TOKEN is repo-scoped
-        # and cannot read another private repo.
+        description: "Private key of the platform-admin GitHub App (mints the dep-fetch token)."
     inputs:
       APP:
         type: string
@@ -28,6 +31,11 @@ on:
         required: false
         default: "src"
         description: "Path passed to `mypy`, e.g. src or deploy."
+      DEP_REPOS:
+        type: string
+        required: false
+        default: "platform-infra-toolkit"
+        description: "Private repo(s) the App token may read for uv sync (newline/space separated)."
       WORKING_DIRECTORY:
         type: string
         required: false
@@ -49,18 +57,20 @@ jobs:
         working-directory: ${{ inputs.WORKING_DIRECTORY }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          token: ${{ secrets.PAT_GITHUB }}
       - uses: astral-sh/setup-uv@v8.2.0
         with:
           python-version: ${{ inputs.PYTHON_VERSION }}
-      # Let uv authenticate to private GitHub git deps with the PAT. Global config
-      # so it applies to uv's own fetches (not just the checked-out repo), and
-      # rewrites the ssh URL the lockfile pins.
+      - name: Mint App token for private dependencies
+        id: dep-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.PLATFORM_ADMIN_APP_ID }}
+          private-key: ${{ secrets.PLATFORM_ADMIN_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.DEP_REPOS }}
       - name: Authenticate private git dependencies
-        run: |
-          git config --global url."https://x-access-token:${{ secrets.PAT_GITHUB }}@github.com/".insteadOf "ssh://git@github.com/"
-          git config --global url."https://x-access-token:${{ secrets.PAT_GITHUB }}@github.com/".insteadOf "https://github.com/"
+        # Global so uv's own fetches use it; rewrites the URL the lockfile pins.
+        run: git config --global url."https://x-access-token:${{ steps.dep-token.outputs.token }}@github.com/".insteadOf "ssh://git@github.com/"
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run mypy ${{ inputs.MYPY_PATH }}
@@ -76,15 +86,19 @@ jobs:
         working-directory: ${{ inputs.WORKING_DIRECTORY }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          token: ${{ secrets.PAT_GITHUB }}
       - uses: astral-sh/setup-uv@v8.2.0
         with:
           python-version: ${{ inputs.PYTHON_VERSION }}
+      - name: Mint App token for private dependencies
+        id: dep-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.PLATFORM_ADMIN_APP_ID }}
+          private-key: ${{ secrets.PLATFORM_ADMIN_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.DEP_REPOS }}
       - name: Authenticate private git dependencies
-        run: |
-          git config --global url."https://x-access-token:${{ secrets.PAT_GITHUB }}@github.com/".insteadOf "ssh://git@github.com/"
-          git config --global url."https://x-access-token:${{ secrets.PAT_GITHUB }}@github.com/".insteadOf "https://github.com/"
+        run: git config --global url."https://x-access-token:${{ steps.dep-token.outputs.token }}@github.com/".insteadOf "ssh://git@github.com/"
       - run: uv sync
       # Run the app directly (no cdk CLI/node); env via CDK_CONTEXT_JSON. app.synth()
       # runs cdk-nag and exits non-zero on SOC2 findings — that is the gate.
