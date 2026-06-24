@@ -50,6 +50,12 @@ env:
 jobs:
   provision:
     runs-on: ubuntu-latest
+    # Bind to the GitHub Environment named by ENV so env-scoped secrets
+    # (AWS_OIDC_ROLE_ARN per account) and deployment protection rules (e.g. a
+    # required reviewer on prod) resolve from the caller repo. New environments
+    # are auto-created without protection, so existing callers are unaffected
+    # unless they configure rules on that environment.
+    environment: ${{ inputs.ENV }}
     defaults:
       run:
         working-directory: ${{ inputs.WORKING_DIRECTORY }}
