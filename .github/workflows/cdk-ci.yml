@@ -1,0 +1,91 @@
+name: CDK CI (lint, types, synth)
+
+# Reusable correctness gate for CDK (Python/uv) repos: ruff + mypy, then a
+# `cdk synth` per environment (which runs the construct library's cdk-nag SOC2
+# checks and fails on findings). Companion to cdk-deploy.yml. Callers add the
+# pull_request/push triggers.
+
+on:
+  workflow_call:
+    secrets:
+      PAT_GITHUB:
+        required: true
+        # Needed for `uv sync` to resolve private Travtus git dependencies
+        # (e.g. platform-infra-toolkit). The default GITHUB_TOKEN is repo-scoped
+        # and cannot read another private repo.
+    inputs:
+      APP:
+        type: string
+        required: true
+        description: "Path to the CDK app entrypoint, e.g. deploy/app.py."
+      ENVS:
+        type: string
+        required: false
+        default: '["dev","qa","uat"]'
+        description: 'JSON array of envs to synth, e.g. ["dev","qa","uat"].'
+      MYPY_PATH:
+        type: string
+        required: false
+        default: "src"
+        description: "Path passed to `mypy`, e.g. src or deploy."
+      WORKING_DIRECTORY:
+        type: string
+        required: false
+        default: "."
+        description: "Directory containing pyproject.toml / cdk.json."
+      PYTHON_VERSION:
+        type: string
+        required: false
+        default: "3.13"
+
+permissions:
+  contents: read
+
+jobs:
+  lint-types:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.WORKING_DIRECTORY }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.PAT_GITHUB }}
+      - uses: astral-sh/setup-uv@v8.2.0
+        with:
+          python-version: ${{ inputs.PYTHON_VERSION }}
+      # Let uv authenticate to private GitHub git deps with the PAT. Global config
+      # so it applies to uv's own fetches (not just the checked-out repo), and
+      # rewrites the ssh URL the lockfile pins.
+      - name: Authenticate private git dependencies
+        run: |
+          git config --global url."https://x-access-token:${{ secrets.PAT_GITHUB }}@github.com/".insteadOf "ssh://git@github.com/"
+          git config --global url."https://x-access-token:${{ secrets.PAT_GITHUB }}@github.com/".insteadOf "https://github.com/"
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run mypy ${{ inputs.MYPY_PATH }}
+
+  synth:
+    needs: lint-types
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        env: ${{ fromJSON(inputs.ENVS) }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.WORKING_DIRECTORY }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.PAT_GITHUB }}
+      - uses: astral-sh/setup-uv@v8.2.0
+        with:
+          python-version: ${{ inputs.PYTHON_VERSION }}
+      - name: Authenticate private git dependencies
+        run: |
+          git config --global url."https://x-access-token:${{ secrets.PAT_GITHUB }}@github.com/".insteadOf "ssh://git@github.com/"
+          git config --global url."https://x-access-token:${{ secrets.PAT_GITHUB }}@github.com/".insteadOf "https://github.com/"
+      - run: uv sync
+      # Run the app directly (no cdk CLI/node); env via CDK_CONTEXT_JSON. app.synth()
+      # runs cdk-nag and exits non-zero on SOC2 findings — that is the gate.
+      - run: CDK_CONTEXT_JSON='{"env":"${{ matrix.env }}"}' uv run python ${{ inputs.APP }}
