@@ -12,10 +12,9 @@ name: CDK CI (lint, types, synth)
 
 on:
   workflow_call:
-    secrets:
-      PLATFORM_ADMIN_APP_PRIVATE_KEY:
-        required: true
-        description: "Private key of the platform-admin GitHub App (mints the dep-fetch token)."
+    # No secrets declared: callers use `secrets: inherit`, so the org secret
+    # PLATFORM_ADMIN_APP_PRIVATE_KEY (and the org var PLATFORM_ADMIN_APP_ID) are
+    # available here by default — no per-caller wiring.
     inputs:
       APP:
         type: string
