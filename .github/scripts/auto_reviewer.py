@@ -305,7 +305,14 @@ class ReviewerAutomation:
             print(f"No reviewer team matched changed files; defaulting to {default_team}.")
             matched_teams = [default_team]
 
-        existing_reviewers = self.github.list_existing_reviewers(owner, repo, pull_number)
+        # A PR author who comments on their own PR (e.g. replying to automated review
+        # feedback) shows up in the reviews list but never satisfies a team's review
+        # requirement, so they must not count toward "this team already has a reviewer".
+        existing_reviewers = [
+            reviewer
+            for reviewer in self.github.list_existing_reviewers(owner, repo, pull_number)
+            if reviewer.lower() != pr_author.lower()
+        ]
         state, comment_id, previous_body = self.github.get_state_comment(
             self.state_owner,
             self.state_repo,
