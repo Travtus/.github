@@ -32,7 +32,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git fetch origin "$BASE_REF" --depth=1 || git fetch origin "$BASE_REF"
+          git fetch --no-tags origin "$BASE_REF" --unshallow 2>/dev/null || git fetch --no-tags origin "$BASE_REF"
 
           if ! git rev-parse --verify "origin/$BASE_REF" > /dev/null 2>&1; then
             echo "::error::Could not resolve base branch 'origin/$BASE_REF'."
