@@ -39,6 +39,11 @@ on:
         type: string
         required: false
         default: "us-east-2"
+      IMAGE_TAG:
+        type: string
+        required: false
+        default: ""
+        description: "Optional immutable image tag passed to CDK as `-c imageTag=<IMAGE_TAG>`."
 
 permissions:
   id-token: write
@@ -71,9 +76,34 @@ jobs:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           role-session-name: cdk-deploy
           aws-region: ${{ inputs.AWS_REGION }}
+      - name: Configure private Git dependencies
+        run: git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --all-groups --frozen
+      - name: Validate image tag
+        if: ${{ inputs.IMAGE_TAG != '' }}
+        env:
+          IMAGE_TAG: ${{ inputs.IMAGE_TAG }}
+        run: |
+          if [[ ! "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "IMAGE_TAG must be a valid Docker tag: start with a letter, digit, or underscore, then use only letters, digits, underscore, period, and dash."
+            exit 1
+          fi
       - name: CDK synth (runs cdk-nag SOC2 checks)
-        run: uv run cdk synth -c env=${{ inputs.ENV }}
+        env:
+          IMAGE_TAG: ${{ inputs.IMAGE_TAG }}
+        run: |
+          args=(-c "env=${{ inputs.ENV }}")
+          if [ -n "$IMAGE_TAG" ]; then
+            args+=(-c "imageTag=$IMAGE_TAG")
+          fi
+          uv run cdk synth "${args[@]}"
       - name: CDK deploy
-        run: uv run cdk deploy ${{ inputs.CDK_STACKS }} -c env=${{ inputs.ENV }} --require-approval never
+        env:
+          IMAGE_TAG: ${{ inputs.IMAGE_TAG }}
+        run: |
+          args=(${{ inputs.CDK_STACKS }} -c "env=${{ inputs.ENV }}")
+          if [ -n "$IMAGE_TAG" ]; then
+            args+=(-c "imageTag=$IMAGE_TAG")
+          fi
+          uv run cdk deploy "${args[@]}" --require-approval never
