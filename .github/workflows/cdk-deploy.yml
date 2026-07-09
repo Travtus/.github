@@ -43,14 +43,11 @@ on:
         type: string
         required: false
         default: ""
-        description: "Optional immutable image tag passed to CDK as `-c imageTag=<IMAGE_TAG>`."
+        description: "Optional full 40-character lowercase hex commit SHA passed to CDK as `-c imageTag=<IMAGE_TAG>`."
 
 permissions:
   id-token: write
   contents: read
-
-env:
-  GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
 
 jobs:
   provision:
@@ -61,7 +58,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          token: ${{ env.GITHUB_TOKEN }}
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v8.2.0
         with:
           python-version: ${{ inputs.PYTHON_VERSION }}
@@ -76,33 +73,61 @@ jobs:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           role-session-name: cdk-deploy
           aws-region: ${{ inputs.AWS_REGION }}
-      - name: Configure private Git dependencies
-        run: git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
       - name: Install dependencies
-        run: uv sync --all-groups --frozen
+        env:
+          PAT_GITHUB: ${{ secrets.PAT_GITHUB }}
+        run: |
+          if [ -z "$PAT_GITHUB" ]; then
+            echo "PAT_GITHUB is required for private Python dependencies."
+            exit 1
+          fi
+          GIT_CONFIG_COUNT=1 \
+          GIT_CONFIG_KEY_0="url.https://x-access-token:${PAT_GITHUB}@github.com/.insteadOf" \
+          GIT_CONFIG_VALUE_0="https://github.com/" \
+            uv sync --all-groups --frozen
       - name: Validate image tag
         if: ${{ inputs.IMAGE_TAG != '' }}
         env:
           IMAGE_TAG: ${{ inputs.IMAGE_TAG }}
         run: |
-          if [[ ! "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
-            echo "IMAGE_TAG must be a valid Docker tag: start with a letter, digit, or underscore, then use only letters, digits, underscore, period, and dash."
+          if [[ ! "$IMAGE_TAG" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "IMAGE_TAG must be a full 40-character lowercase commit SHA."
+            exit 1
+          fi
+      - name: Validate deploy inputs
+        env:
+          DEPLOY_ENV: ${{ inputs.ENV }}
+          CDK_STACKS: ${{ inputs.CDK_STACKS }}
+        run: |
+          case "$DEPLOY_ENV" in
+            dev|qa|uat|prod) ;;
+            *)
+              echo "ENV must be one of: dev, qa, uat, prod."
+              exit 1
+              ;;
+          esac
+          if [[ ! "$CDK_STACKS" =~ ^(--all|[A-Za-z0-9:._/-]+([[:space:]][A-Za-z0-9:._/-]+)*)$ ]]; then
+            echo "CDK_STACKS must be --all or space-separated CDK stack names."
             exit 1
           fi
       - name: CDK synth (runs cdk-nag SOC2 checks)
         env:
+          DEPLOY_ENV: ${{ inputs.ENV }}
           IMAGE_TAG: ${{ inputs.IMAGE_TAG }}
         run: |
-          args=(-c "env=${{ inputs.ENV }}")
+          args=(-c "env=$DEPLOY_ENV")
           if [ -n "$IMAGE_TAG" ]; then
             args+=(-c "imageTag=$IMAGE_TAG")
           fi
           uv run cdk synth "${args[@]}"
       - name: CDK deploy
         env:
+          DEPLOY_ENV: ${{ inputs.ENV }}
+          CDK_STACKS: ${{ inputs.CDK_STACKS }}
           IMAGE_TAG: ${{ inputs.IMAGE_TAG }}
         run: |
-          args=(${{ inputs.CDK_STACKS }} -c "env=${{ inputs.ENV }}")
+          read -r -a stacks <<< "$CDK_STACKS"
+          args=("${stacks[@]}" -c "env=$DEPLOY_ENV")
           if [ -n "$IMAGE_TAG" ]; then
             args+=(-c "imageTag=$IMAGE_TAG")
           fi

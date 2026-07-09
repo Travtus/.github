@@ -17,6 +17,49 @@ For other package management tools, like `pip`, `poetry`, you can use the `pypro
 
 ## Reusable workflows
 
+### `cdk-deploy.yml` — Provision infrastructure with CDK
+
+Runs `uv sync --all-groups --frozen`, `cdk synth`, and `cdk deploy` for a
+consumer repository CDK app. Use this when a service repo owns its deployable
+`cdk.json` and stack code but wants the shared Travtus OIDC/CDK workflow shape.
+
+**Triggers:** `workflow_call`
+
+**Inputs:**
+
+| Name | Required | Default | Description |
+|---|---|---|---|
+| `ENV` | yes | — | One of `dev`, `qa`, `uat`, or `prod`; passed as `-c env=<ENV>`. |
+| `CDK_STACKS` | no | `--all` | `--all` or space-separated stack names for `cdk deploy`. |
+| `WORKING_DIRECTORY` | no | `.` | Directory containing `cdk.json`. |
+| `PYTHON_VERSION` | no | `3.13` | Python version for `uv`. |
+| `NODE_VERSION` | no | `20` | Node version for the CDK CLI. |
+| `CDK_VERSION` | no | `2.1128.0` | `aws-cdk` CLI version. |
+| `AWS_REGION` | no | `us-east-2` | AWS region for OIDC and CDK. |
+| `IMAGE_TAG` | no | empty | Optional full 40-character lowercase hex commit SHA passed as `-c imageTag=<IMAGE_TAG>`. |
+
+**Secrets:** `PAT_GITHUB`, `AWS_OIDC_ROLE_ARN` (required).
+
+`PAT_GITHUB` is currently used only inside the `uv sync` step through ephemeral
+Git config so private git dependencies can be resolved without persisting
+checkout credentials. Prefer replacing it with a short-lived GitHub App token
+once the shared app secret contract is available to callers.
+
+**Example:**
+```yaml
+jobs:
+  deploy-warehouse:
+    uses: Travtus/.github/.github/workflows/cdk-deploy.yml@main
+    secrets:
+      PAT_GITHUB: ${{ secrets.PAT_GITHUB }}
+      AWS_OIDC_ROLE_ARN: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+    with:
+      ENV: uat
+      CDK_STACKS: data-platform-warehouse-uat
+      WORKING_DIRECTORY: .
+      IMAGE_TAG: ${{ github.sha }}
+```
+
 ### `auto_assign_round_robin.yml` — PR reviewer assignment
 
 Assigns PR reviewers from the `Platform` and `frontend` GitHub teams based on changed file extensions. The workflow is intended to be selected as an organization ruleset required workflow, so individual repositories do not need caller workflows.
