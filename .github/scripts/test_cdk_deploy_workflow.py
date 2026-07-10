@@ -44,6 +44,14 @@ def test_deploy_uses_reviewed_cloud_assembly_after_environment_approval() -> Non
     assert WORKFLOW.index("uv run cdk diff") < WORKFLOW.index("- name: CDK deploy")
 
 
+def test_plan_only_publishes_diff_without_provisioning() -> None:
+    assert "PLAN_ONLY:" in WORKFLOW
+    assert "if: ${{ !inputs.PLAN_ONLY }}" in WORKFLOW
+    assert "--no-change-set" in WORKFLOW
+    assert "GITHUB_STEP_SUMMARY" in WORKFLOW
+    assert "`PLAN_ONLY`" in CDK_README
+
+
 def test_readme_documents_the_caller_contract() -> None:
     assert "`PAT_GITHUB`" not in CDK_README
     assert "`PLATFORM_ADMIN_APP_ID`" in CDK_README
@@ -56,4 +64,5 @@ if __name__ == "__main__":
     test_private_dependency_credentials_are_ephemeral_and_verified()
     test_image_tag_is_validated_and_passed_to_synth_and_deploy()
     test_deploy_uses_reviewed_cloud_assembly_after_environment_approval()
+    test_plan_only_publishes_diff_without_provisioning()
     test_readme_documents_the_caller_contract()

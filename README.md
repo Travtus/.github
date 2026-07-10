@@ -50,6 +50,7 @@ consumer repository CDK app. Use this when a service repo owns its deployable
 | `IMAGE_TAG` | no | empty | Optional full 40-character lowercase hex commit SHA passed as `-c imageTag=<IMAGE_TAG>`. |
 | `PRIVATE_DEPENDENCY_REPOSITORIES` | no | `platform-infra-toolkit` | Newline-separated private Travtus repositories available to the install step. |
 | `DEPLOYMENT_ID` | no | `cdk` | Safe stable id used to name the reviewed cloud-assembly artifact; callers with multiple deploy jobs must use a unique value per job. |
+| `PLAN_ONLY` | no | `false` | Run synth and diff without running the provision job. Use this for pull-request plans. |
 
 **Secrets:** `PLATFORM_ADMIN_APP_PRIVATE_KEY`, `AWS_OIDC_ROLE_ARN` (required).
 
@@ -66,6 +67,10 @@ resulting cloud assembly. A second job targets the GitHub Environment named by
 `ENV`, waits for its native protection rules, and deploys that exact assembly.
 Configure required reviewers and deployment-branch rules on UAT/prod
 environments; keep the caller pinned to an immutable workflow commit or release.
+
+With `PLAN_ONLY: true`, the preview uses a template-only `cdk diff`, publishes
+the result in the Actions job summary, and skips only the provision job. Normal
+deployment calls still preview, wait for environment approval, and deploy.
 
 **Example:**
 ```yaml

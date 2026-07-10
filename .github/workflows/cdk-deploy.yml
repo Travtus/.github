@@ -54,6 +54,11 @@ on:
         required: false
         default: "cdk"
         description: "Stable letters/digits/dot/dash/underscore id used for the reviewed cloud-assembly artifact."
+      PLAN_ONLY:
+        type: boolean
+        required: false
+        default: false
+        description: "Run synth and diff without provisioning. Intended for pull-request plans."
 
 permissions:
   contents: read
@@ -165,10 +170,28 @@ jobs:
       - name: Preview CDK changes
         env:
           CDK_STACKS: ${{ inputs.CDK_STACKS }}
+          DEPLOY_ENV: ${{ inputs.ENV }}
           NO_COLOR: "1"
+          PLAN_ONLY: ${{ inputs.PLAN_ONLY }}
         run: |
           read -r -a stacks <<< "$CDK_STACKS"
-          uv run cdk diff "${stacks[@]}" --app cdk.out
+          diff_args=("${stacks[@]}" --app cdk.out)
+          if [ "$PLAN_ONLY" = "true" ]; then
+            diff_args+=(--no-change-set)
+          fi
+
+          set +e
+          uv run cdk diff "${diff_args[@]}" 2>&1 | tee "$RUNNER_TEMP/cdk-diff.txt"
+          diff_status=${PIPESTATUS[0]}
+          set -e
+
+          {
+            printf '### CDK diff: `%s`\n\n' "$DEPLOY_ENV"
+            echo '```text'
+            cat "$RUNNER_TEMP/cdk-diff.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$diff_status"
       - name: Upload reviewed cloud assembly
         uses: actions/upload-artifact@v6
         with:
@@ -179,6 +202,7 @@ jobs:
 
   provision:
     needs: preview
+    if: ${{ !inputs.PLAN_ONLY }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.ENV }}
     permissions:
