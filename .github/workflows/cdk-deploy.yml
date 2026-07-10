@@ -3,7 +3,7 @@ name: Provision infrastructure with CDK
 on:
   workflow_call:
     secrets:
-      PAT_GITHUB:
+      PLATFORM_ADMIN_APP_PRIVATE_KEY:
         required: true
       AWS_OIDC_ROLE_ARN:
         required: true
@@ -44,6 +44,11 @@ on:
         required: false
         default: ""
         description: "Optional full 40-character lowercase hex commit SHA passed to CDK as `-c imageTag=<IMAGE_TAG>`."
+      PRIVATE_DEPENDENCY_REPOSITORIES:
+        type: string
+        required: false
+        default: "platform-infra-toolkit"
+        description: "Newline-separated Travtus repositories readable by the dependency GitHub App token."
 
 permissions:
   id-token: write
@@ -73,18 +78,43 @@ jobs:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           role-session-name: cdk-deploy
           aws-region: ${{ inputs.AWS_REGION }}
+      - name: Create GitHub App token for private dependencies
+        id: private-dependency-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.PLATFORM_ADMIN_APP_ID }}
+          private-key: ${{ secrets.PLATFORM_ADMIN_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.PRIVATE_DEPENDENCY_REPOSITORIES }}
+          permission-contents: read
       - name: Install dependencies
         env:
-          PAT_GITHUB: ${{ secrets.PAT_GITHUB }}
+          PRIVATE_DEPENDENCY_REPOSITORIES: ${{ inputs.PRIVATE_DEPENDENCY_REPOSITORIES }}
+          PRIVATE_DEPENDENCY_TOKEN: ${{ steps.private-dependency-token.outputs.token }}
         run: |
-          if [ -z "$PAT_GITHUB" ]; then
-            echo "PAT_GITHUB is required for private Python dependencies."
+          cleanup_git_auth() {
+            git config --global --unset-all url."https://x-access-token:${PRIVATE_DEPENDENCY_TOKEN}@github.com/".insteadOf || true
+          }
+          trap cleanup_git_auth EXIT
+          git config --global url."https://x-access-token:${PRIVATE_DEPENDENCY_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+          repository_count=0
+          while IFS= read -r repository; do
+            repository="${repository%$'\r'}"
+            [ -z "$repository" ] && continue
+            if [[ ! "$repository" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+              echo "Invalid private dependency repository: $repository"
+              exit 1
+            fi
+            git ls-remote --exit-code "https://github.com/${{ github.repository_owner }}/${repository}.git" HEAD >/dev/null
+            repository_count=$((repository_count + 1))
+          done <<< "$PRIVATE_DEPENDENCY_REPOSITORIES"
+
+          if [ "$repository_count" -eq 0 ]; then
+            echo "PRIVATE_DEPENDENCY_REPOSITORIES must include at least one repository."
             exit 1
           fi
-          GIT_CONFIG_COUNT=1 \
-          GIT_CONFIG_KEY_0="url.https://x-access-token:${PAT_GITHUB}@github.com/.insteadOf" \
-          GIT_CONFIG_VALUE_0="https://github.com/" \
-            uv sync --all-groups --frozen
+          uv sync --all-groups --frozen
       - name: Validate image tag
         if: ${{ inputs.IMAGE_TAG != '' }}
         env:

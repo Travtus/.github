@@ -37,13 +37,17 @@ consumer repository CDK app. Use this when a service repo owns its deployable
 | `CDK_VERSION` | no | `2.1128.0` | `aws-cdk` CLI version. |
 | `AWS_REGION` | no | `us-east-2` | AWS region for OIDC and CDK. |
 | `IMAGE_TAG` | no | empty | Optional full 40-character lowercase hex commit SHA passed as `-c imageTag=<IMAGE_TAG>`. |
+| `PRIVATE_DEPENDENCY_REPOSITORIES` | no | `platform-infra-toolkit` | Newline-separated private Travtus repositories available to the install step. |
 
-**Secrets:** `PAT_GITHUB`, `AWS_OIDC_ROLE_ARN` (required).
+**Secrets:** `PLATFORM_ADMIN_APP_PRIVATE_KEY`, `AWS_OIDC_ROLE_ARN` (required).
 
-`PAT_GITHUB` is currently used only inside the `uv sync` step through ephemeral
-Git config so private git dependencies can be resolved without persisting
-checkout credentials. Prefer replacing it with a short-lived GitHub App token
-once the shared app secret contract is available to callers.
+**Variables:** `PLATFORM_ADMIN_APP_ID` (required; the App client ID).
+
+The workflow mints a short-lived GitHub App token scoped to
+`PRIVATE_DEPENDENCY_REPOSITORIES`. The App installation needs `Contents: Read`
+for each listed repository. Checkout credentials are not persisted, private
+repository access is verified before `uv sync`, and temporary Git URL rewriting
+is removed when the install step exits.
 
 **Example:**
 ```yaml
@@ -51,13 +55,14 @@ jobs:
   deploy-warehouse:
     uses: Travtus/.github/.github/workflows/cdk-deploy.yml@main
     secrets:
-      PAT_GITHUB: ${{ secrets.PAT_GITHUB }}
+      PLATFORM_ADMIN_APP_PRIVATE_KEY: ${{ secrets.PLATFORM_ADMIN_APP_PRIVATE_KEY }}
       AWS_OIDC_ROLE_ARN: ${{ secrets.AWS_OIDC_ROLE_ARN }}
     with:
       ENV: uat
       CDK_STACKS: data-platform-warehouse-uat
       WORKING_DIRECTORY: .
       IMAGE_TAG: ${{ github.sha }}
+      PRIVATE_DEPENDENCY_REPOSITORIES: platform-infra-toolkit
 ```
 
 ### `auto_assign_round_robin.yml` — PR reviewer assignment
