@@ -8,6 +8,16 @@ in its .github directory. This is for PR automation around the workflows themsel
 If you update this repository's template for automatic comments, then you should also update this repository's workflow
 for automatic comments.
 
+## Contents
+
+- [Project configuration file](#project-configuration-file)
+- [Reusable workflows](#reusable-workflows)
+  - [`cdk-deploy.yml`](#cdk-deploy)
+  - [`auto_assign_round_robin.yml`](#auto-assign-round-robin)
+  - [`pr_size_check.yml`](#pr-size-check)
+  - [`run-alembic-migrations.yml`](#run-alembic-migrations)
+  - [`deploy_ecs_service_to_env.yaml`](#deploy-ecs-service-to-env)
+
 ## Project configuration file
 
 If you use `uv` to manage your Python projects, please copy `pyproject-uv.toml` to your project root and rename it to `pyproject.toml`.
@@ -17,6 +27,7 @@ For other package management tools, like `pip`, `poetry`, you can use the `pypro
 
 ## Reusable workflows
 
+<a id="cdk-deploy"></a>
 ### `cdk-deploy.yml` — Provision infrastructure with CDK
 
 Runs `uv sync --all-groups --frozen`, `cdk synth`, and `cdk deploy` for a
@@ -65,6 +76,7 @@ jobs:
       PRIVATE_DEPENDENCY_REPOSITORIES: platform-infra-toolkit
 ```
 
+<a id="auto-assign-round-robin"></a>
 ### `auto_assign_round_robin.yml` — PR reviewer assignment
 
 Assigns PR reviewers from the `Platform` and `frontend` GitHub teams based on changed file extensions. The workflow is intended to be selected as an organization ruleset required workflow, so individual repositories do not need caller workflows.
@@ -115,6 +127,7 @@ Before enabling the workflow:
 ```
 ````
 
+<a id="pr-size-check"></a>
 ### `pr_size_check.yml` — PR size enforcement
 
 Fails a PR when the number of changed lines exceeds **750** (configurable in the workflow). Designed to keep PRs reviewable and aligned with trunk-based development.
@@ -139,6 +152,7 @@ Configure the repository variable `PLATFORM_ADMIN_APP_ID` with the GitHub App cl
 - Binary files (Git reports `-` in numstat)
 
 
+<a id="run-alembic-migrations"></a>
 ### `run-alembic-migrations.yml` — Run Alembic migrations on ECS
 
 Runs an Alembic command as a one-shot Fargate task using an existing ECS task definition (with a `containerOverrides` command). Waits for the task to finish, prints a CloudWatch log URL, and fails on non-zero exit.
@@ -177,6 +191,7 @@ jobs:
 
 ---
 
+<a id="deploy-ecs-service-to-env"></a>
 ### `deploy_ecs_service_to_env.yaml` — Deploy ECS service (build → migrate → restart)
 
 Orchestrates a full ECS service deploy for one environment by chaining three reusable workflows:

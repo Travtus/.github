@@ -25,6 +25,13 @@ def test_private_dependency_credentials_are_ephemeral_and_verified() -> None:
     assert "uv sync --all-groups --frozen" in WORKFLOW
 
 
+def test_image_tag_is_validated_and_passed_to_synth_and_deploy() -> None:
+    assert "if: ${{ inputs.IMAGE_TAG != '' }}" in WORKFLOW
+    assert '[[ ! "$IMAGE_TAG" =~ ^[0-9a-f]{40}$ ]]' in WORKFLOW
+    assert WORKFLOW.count('args+=(-c "imageTag=$IMAGE_TAG")') == 2
+    assert "IMAGE_TAG: ${{ github.sha }}" in CDK_README
+
+
 def test_readme_documents_the_caller_contract() -> None:
     assert "`PAT_GITHUB`" not in CDK_README
     assert "`PLATFORM_ADMIN_APP_ID`" in CDK_README
@@ -35,4 +42,5 @@ def test_readme_documents_the_caller_contract() -> None:
 if __name__ == "__main__":
     test_private_dependencies_use_scoped_github_app_auth()
     test_private_dependency_credentials_are_ephemeral_and_verified()
+    test_image_tag_is_validated_and_passed_to_synth_and_deploy()
     test_readme_documents_the_caller_contract()
