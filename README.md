@@ -8,6 +8,16 @@ in its .github directory. This is for PR automation around the workflows themsel
 If you update this repository's template for automatic comments, then you should also update this repository's workflow
 for automatic comments.
 
+## Contents
+
+- [Project configuration file](#project-configuration-file)
+- [Reusable workflows](#reusable-workflows)
+  - [`cdk-deploy.yml`](#cdk-deploy)
+  - [`auto_assign_round_robin.yml`](#auto-assign-round-robin)
+  - [`pr_size_check.yml`](#pr-size-check)
+  - [`run-alembic-migrations.yml`](#run-alembic-migrations)
+  - [`deploy_ecs_service_to_env.yaml`](#deploy-ecs-service-to-env)
+
 ## Project configuration file
 
 If you use `uv` to manage your Python projects, please copy `pyproject-uv.toml` to your project root and rename it to `pyproject.toml`.
@@ -17,6 +27,69 @@ For other package management tools, like `pip`, `poetry`, you can use the `pypro
 
 ## Reusable workflows
 
+<a id="cdk-deploy"></a>
+### `cdk-deploy.yml` — Provision infrastructure with CDK
+
+Runs `uv sync --all-groups --frozen`, `cdk synth`, and `cdk deploy` for a
+consumer repository CDK app. Use this when a service repo owns its deployable
+`cdk.json` and stack code but wants the shared Travtus OIDC/CDK workflow shape.
+
+**Triggers:** `workflow_call`
+
+**Inputs:**
+
+| Name | Required | Default | Description |
+|---|---|---|---|
+| `ENV` | yes | — | One of `dev`, `qa`, `uat`, or `prod`; passed as `-c env=<ENV>`. |
+| `CDK_STACKS` | no | `--all` | `--all` or space-separated stack names for `cdk deploy`. |
+| `WORKING_DIRECTORY` | no | `.` | Directory containing `cdk.json`. |
+| `PYTHON_VERSION` | no | `3.13` | Python version for `uv`. |
+| `NODE_VERSION` | no | `20` | Node version for the CDK CLI. |
+| `CDK_VERSION` | no | `2.1128.0` | `aws-cdk` CLI version. |
+| `AWS_REGION` | no | `us-east-2` | AWS region for OIDC and CDK. |
+| `IMAGE_TAG` | no | empty | Optional full 40-character lowercase hex commit SHA passed as `-c imageTag=<IMAGE_TAG>`. |
+| `PRIVATE_DEPENDENCY_REPOSITORIES` | no | `platform-infra-toolkit` | Newline-separated private Travtus repositories available to the install step. |
+| `DEPLOYMENT_ID` | no | `cdk` | Safe stable id used to name the reviewed cloud-assembly artifact; callers with multiple deploy jobs must use a unique value per job. |
+| `PLAN_ONLY` | no | `false` | Run synth and diff without running the provision job. Use this for pull-request plans. |
+
+**Secrets:** `PLATFORM_ADMIN_APP_PRIVATE_KEY`, `AWS_OIDC_ROLE_ARN` (required).
+
+**Variables:** `PLATFORM_ADMIN_APP_ID` (required; the App client ID).
+
+The workflow mints a short-lived GitHub App token scoped to
+`PRIVATE_DEPENDENCY_REPOSITORIES`. The App installation needs `Contents: Read`
+for each listed repository. Checkout credentials are not persisted, private
+repository access is verified before `uv sync`, and temporary Git URL rewriting
+is removed when the install step exits.
+
+The workflow synthesizes and runs `cdk diff` in a preview job, then uploads the
+resulting cloud assembly. A second job targets the GitHub Environment named by
+`ENV`, waits for its native protection rules, and deploys that exact assembly.
+Configure required reviewers and deployment-branch rules on every deployment
+environment; keep the caller pinned to an immutable workflow commit or release.
+
+With `PLAN_ONLY: true`, the preview uses a template-only `cdk diff`, publishes
+the result in the Actions job summary, and skips only the provision job. Normal
+deployment calls still preview, wait for environment approval, and deploy.
+
+**Example:**
+```yaml
+jobs:
+  deploy-warehouse:
+    uses: Travtus/.github/.github/workflows/cdk-deploy.yml@main
+    secrets:
+      PLATFORM_ADMIN_APP_PRIVATE_KEY: ${{ secrets.PLATFORM_ADMIN_APP_PRIVATE_KEY }}
+      AWS_OIDC_ROLE_ARN: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+    with:
+      ENV: uat
+      CDK_STACKS: data-platform-warehouse-uat
+      WORKING_DIRECTORY: .
+      IMAGE_TAG: ${{ github.sha }}
+      PRIVATE_DEPENDENCY_REPOSITORIES: platform-infra-toolkit
+      DEPLOYMENT_ID: warehouse-uat
+```
+
+<a id="auto-assign-round-robin"></a>
 ### `auto_assign_round_robin.yml` — PR reviewer assignment
 
 Assigns PR reviewers from the `Platform` and `frontend` GitHub teams based on changed file extensions. The workflow is intended to be selected as an organization ruleset required workflow, so individual repositories do not need caller workflows.
@@ -67,6 +140,7 @@ Before enabling the workflow:
 ```
 ````
 
+<a id="pr-size-check"></a>
 ### `pr_size_check.yml` — PR size enforcement
 
 Fails a PR when the number of changed lines exceeds **750** (configurable in the workflow). Designed to keep PRs reviewable and aligned with trunk-based development.
@@ -91,6 +165,7 @@ Configure the repository variable `PLATFORM_ADMIN_APP_ID` with the GitHub App cl
 - Binary files (Git reports `-` in numstat)
 
 
+<a id="run-alembic-migrations"></a>
 ### `run-alembic-migrations.yml` — Run Alembic migrations on ECS
 
 Runs an Alembic command as a one-shot Fargate task using an existing ECS task definition (with a `containerOverrides` command). Waits for the task to finish, prints a CloudWatch log URL, and fails on non-zero exit.
@@ -129,6 +204,7 @@ jobs:
 
 ---
 
+<a id="deploy-ecs-service-to-env"></a>
 ### `deploy_ecs_service_to_env.yaml` — Deploy ECS service (build → migrate → restart)
 
 Orchestrates a full ECS service deploy for one environment by chaining three reusable workflows:

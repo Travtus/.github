@@ -3,7 +3,7 @@ name: Provision infrastructure with CDK
 on:
   workflow_call:
     secrets:
-      PAT_GITHUB:
+      PLATFORM_ADMIN_APP_PRIVATE_KEY:
         required: true
       AWS_OIDC_ROLE_ARN:
         required: true
@@ -39,24 +39,43 @@ on:
         type: string
         required: false
         default: "us-east-2"
+      IMAGE_TAG:
+        type: string
+        required: false
+        default: ""
+        description: "Optional full 40-character lowercase hex commit SHA passed to CDK as `-c imageTag=<IMAGE_TAG>`."
+      PRIVATE_DEPENDENCY_REPOSITORIES:
+        type: string
+        required: false
+        default: "platform-infra-toolkit"
+        description: "Newline-separated Travtus repositories readable by the dependency GitHub App token."
+      DEPLOYMENT_ID:
+        type: string
+        required: false
+        default: "cdk"
+        description: "Stable letters/digits/dot/dash/underscore id used for the reviewed cloud-assembly artifact."
+      PLAN_ONLY:
+        type: boolean
+        required: false
+        default: false
+        description: "Run synth and diff without provisioning. Intended for pull-request plans."
 
 permissions:
-  id-token: write
   contents: read
 
-env:
-  GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
-
 jobs:
-  provision:
+  preview:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     defaults:
       run:
         working-directory: ${{ inputs.WORKING_DIRECTORY }}
     steps:
       - uses: actions/checkout@v7
         with:
-          token: ${{ env.GITHUB_TOKEN }}
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v8.2.0
         with:
           python-version: ${{ inputs.PYTHON_VERSION }}
@@ -71,9 +90,146 @@ jobs:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
           role-session-name: cdk-deploy
           aws-region: ${{ inputs.AWS_REGION }}
+      - name: Create GitHub App token for private dependencies
+        id: private-dependency-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.PLATFORM_ADMIN_APP_ID }}
+          private-key: ${{ secrets.PLATFORM_ADMIN_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ inputs.PRIVATE_DEPENDENCY_REPOSITORIES }}
+          permission-contents: read
       - name: Install dependencies
-        run: uv sync
+        env:
+          PRIVATE_DEPENDENCY_REPOSITORIES: ${{ inputs.PRIVATE_DEPENDENCY_REPOSITORIES }}
+          PRIVATE_DEPENDENCY_TOKEN: ${{ steps.private-dependency-token.outputs.token }}
+        run: |
+          cleanup_git_auth() {
+            git config --global --unset-all url."https://x-access-token:${PRIVATE_DEPENDENCY_TOKEN}@github.com/".insteadOf || true
+          }
+          trap cleanup_git_auth EXIT
+          git config --global url."https://x-access-token:${PRIVATE_DEPENDENCY_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+          repository_count=0
+          while IFS= read -r repository; do
+            repository="${repository%$'\r'}"
+            [ -z "$repository" ] && continue
+            if [[ ! "$repository" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+              echo "Invalid private dependency repository: $repository"
+              exit 1
+            fi
+            git ls-remote --exit-code "https://github.com/${{ github.repository_owner }}/${repository}.git" HEAD >/dev/null
+            repository_count=$((repository_count + 1))
+          done <<< "$PRIVATE_DEPENDENCY_REPOSITORIES"
+
+          if [ "$repository_count" -eq 0 ]; then
+            echo "PRIVATE_DEPENDENCY_REPOSITORIES must include at least one repository."
+            exit 1
+          fi
+          uv sync --all-groups --frozen
+      - name: Validate image tag
+        if: ${{ inputs.IMAGE_TAG != '' }}
+        env:
+          IMAGE_TAG: ${{ inputs.IMAGE_TAG }}
+        run: |
+          if [[ ! "$IMAGE_TAG" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "IMAGE_TAG must be a full 40-character lowercase commit SHA."
+            exit 1
+          fi
+      - name: Validate deploy inputs
+        env:
+          DEPLOYMENT_ID: ${{ inputs.DEPLOYMENT_ID }}
+          DEPLOY_ENV: ${{ inputs.ENV }}
+          CDK_STACKS: ${{ inputs.CDK_STACKS }}
+        run: |
+          case "$DEPLOY_ENV" in
+            dev|qa|uat|prod) ;;
+            *)
+              echo "ENV must be one of: dev, qa, uat, prod."
+              exit 1
+              ;;
+          esac
+          if [[ ! "$CDK_STACKS" =~ ^(--all|[A-Za-z0-9:._/-]+([[:space:]][A-Za-z0-9:._/-]+)*)$ ]]; then
+            echo "CDK_STACKS must be --all or space-separated CDK stack names."
+            exit 1
+          fi
+          if [[ ! "$DEPLOYMENT_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "DEPLOYMENT_ID must use only letters, digits, dot, dash, and underscore."
+            exit 1
+          fi
       - name: CDK synth (runs cdk-nag SOC2 checks)
-        run: uv run cdk synth -c env=${{ inputs.ENV }}
+        env:
+          DEPLOY_ENV: ${{ inputs.ENV }}
+          IMAGE_TAG: ${{ inputs.IMAGE_TAG }}
+        run: |
+          args=(-c "env=$DEPLOY_ENV")
+          if [ -n "$IMAGE_TAG" ]; then
+            args+=(-c "imageTag=$IMAGE_TAG")
+          fi
+          uv run cdk synth "${args[@]}"
+      - name: Preview CDK changes
+        env:
+          CDK_STACKS: ${{ inputs.CDK_STACKS }}
+          DEPLOY_ENV: ${{ inputs.ENV }}
+          NO_COLOR: "1"
+          PLAN_ONLY: ${{ inputs.PLAN_ONLY }}
+        run: |
+          read -r -a stacks <<< "$CDK_STACKS"
+          diff_args=("${stacks[@]}" --app cdk.out)
+          if [ "$PLAN_ONLY" = "true" ]; then
+            diff_args+=(--no-change-set)
+          fi
+
+          set +e
+          uv run cdk diff "${diff_args[@]}" 2>&1 | tee "$RUNNER_TEMP/cdk-diff.txt"
+          diff_status=${PIPESTATUS[0]}
+          set -e
+
+          {
+            printf '### CDK diff: `%s`\n\n' "$DEPLOY_ENV"
+            echo '```text'
+            cat "$RUNNER_TEMP/cdk-diff.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$diff_status"
+      - name: Upload reviewed cloud assembly
+        uses: actions/upload-artifact@v6
+        with:
+          name: cdk-assembly-${{ inputs.DEPLOYMENT_ID }}
+          path: ${{ inputs.WORKING_DIRECTORY }}/cdk.out
+          if-no-files-found: error
+          retention-days: 1
+
+  provision:
+    needs: preview
+    if: ${{ !inputs.PLAN_ONLY }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.ENV }}
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: ${{ inputs.WORKING_DIRECTORY }}
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: cdk-assembly-${{ inputs.DEPLOYMENT_ID }}
+          path: ${{ inputs.WORKING_DIRECTORY }}/cdk.out
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.NODE_VERSION }}
+      - name: Install AWS CDK CLI
+        run: npm install -g aws-cdk@${{ inputs.CDK_VERSION }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          role-session-name: cdk-deploy
+          aws-region: ${{ inputs.AWS_REGION }}
       - name: CDK deploy
-        run: uv run cdk deploy ${{ inputs.CDK_STACKS }} -c env=${{ inputs.ENV }} --require-approval never
+        env:
+          CDK_STACKS: ${{ inputs.CDK_STACKS }}
+        run: |
+          read -r -a stacks <<< "$CDK_STACKS"
+          cdk deploy "${stacks[@]}" --app cdk.out --require-approval never
