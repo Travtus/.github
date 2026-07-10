@@ -65,8 +65,8 @@ is removed when the install step exits.
 The workflow synthesizes and runs `cdk diff` in a preview job, then uploads the
 resulting cloud assembly. A second job targets the GitHub Environment named by
 `ENV`, waits for its native protection rules, and deploys that exact assembly.
-Configure required reviewers and deployment-branch rules on UAT/prod
-environments; keep the caller pinned to an immutable workflow commit or release.
+Configure required reviewers and deployment-branch rules on every deployment
+environment; keep the caller pinned to an immutable workflow commit or release.
 
 With `PLAN_ONLY: true`, the preview uses a template-only `cdk diff`, publishes
 the result in the Actions job summary, and skips only the provision job. Normal
