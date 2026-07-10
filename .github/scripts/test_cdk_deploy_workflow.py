@@ -28,8 +28,20 @@ def test_private_dependency_credentials_are_ephemeral_and_verified() -> None:
 def test_image_tag_is_validated_and_passed_to_synth_and_deploy() -> None:
     assert "if: ${{ inputs.IMAGE_TAG != '' }}" in WORKFLOW
     assert '[[ ! "$IMAGE_TAG" =~ ^[0-9a-f]{40}$ ]]' in WORKFLOW
-    assert WORKFLOW.count('args+=(-c "imageTag=$IMAGE_TAG")') == 2
+    assert WORKFLOW.count('args+=(-c "imageTag=$IMAGE_TAG")') == 1
     assert "IMAGE_TAG: ${{ github.sha }}" in CDK_README
+
+
+def test_deploy_uses_reviewed_cloud_assembly_after_environment_approval() -> None:
+    assert "  preview:" in WORKFLOW
+    assert "  provision:" in WORKFLOW
+    assert "needs: preview" in WORKFLOW
+    assert "cdk diff" in WORKFLOW
+    assert "actions/upload-artifact@v6" in WORKFLOW
+    assert "actions/download-artifact@v7" in WORKFLOW
+    assert "environment: ${{ inputs.ENV }}" in WORKFLOW
+    assert "--app cdk.out" in WORKFLOW
+    assert WORKFLOW.index("uv run cdk diff") < WORKFLOW.index("- name: CDK deploy")
 
 
 def test_readme_documents_the_caller_contract() -> None:
@@ -43,4 +55,5 @@ if __name__ == "__main__":
     test_private_dependencies_use_scoped_github_app_auth()
     test_private_dependency_credentials_are_ephemeral_and_verified()
     test_image_tag_is_validated_and_passed_to_synth_and_deploy()
+    test_deploy_uses_reviewed_cloud_assembly_after_environment_approval()
     test_readme_documents_the_caller_contract()

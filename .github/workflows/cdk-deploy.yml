@@ -49,14 +49,21 @@ on:
         required: false
         default: "platform-infra-toolkit"
         description: "Newline-separated Travtus repositories readable by the dependency GitHub App token."
+      DEPLOYMENT_ID:
+        type: string
+        required: false
+        default: "cdk"
+        description: "Stable letters/digits/dot/dash/underscore id used for the reviewed cloud-assembly artifact."
 
 permissions:
-  id-token: write
   contents: read
 
 jobs:
-  provision:
+  preview:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     defaults:
       run:
         working-directory: ${{ inputs.WORKING_DIRECTORY }}
@@ -126,6 +133,7 @@ jobs:
           fi
       - name: Validate deploy inputs
         env:
+          DEPLOYMENT_ID: ${{ inputs.DEPLOYMENT_ID }}
           DEPLOY_ENV: ${{ inputs.ENV }}
           CDK_STACKS: ${{ inputs.CDK_STACKS }}
         run: |
@@ -140,6 +148,10 @@ jobs:
             echo "CDK_STACKS must be --all or space-separated CDK stack names."
             exit 1
           fi
+          if [[ ! "$DEPLOYMENT_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "DEPLOYMENT_ID must use only letters, digits, dot, dash, and underscore."
+            exit 1
+          fi
       - name: CDK synth (runs cdk-nag SOC2 checks)
         env:
           DEPLOY_ENV: ${{ inputs.ENV }}
@@ -150,15 +162,50 @@ jobs:
             args+=(-c "imageTag=$IMAGE_TAG")
           fi
           uv run cdk synth "${args[@]}"
-      - name: CDK deploy
+      - name: Preview CDK changes
         env:
-          DEPLOY_ENV: ${{ inputs.ENV }}
           CDK_STACKS: ${{ inputs.CDK_STACKS }}
-          IMAGE_TAG: ${{ inputs.IMAGE_TAG }}
+          NO_COLOR: "1"
         run: |
           read -r -a stacks <<< "$CDK_STACKS"
-          args=("${stacks[@]}" -c "env=$DEPLOY_ENV")
-          if [ -n "$IMAGE_TAG" ]; then
-            args+=(-c "imageTag=$IMAGE_TAG")
-          fi
-          uv run cdk deploy "${args[@]}" --require-approval never
+          uv run cdk diff "${stacks[@]}" --app cdk.out
+      - name: Upload reviewed cloud assembly
+        uses: actions/upload-artifact@v6
+        with:
+          name: cdk-assembly-${{ inputs.DEPLOYMENT_ID }}
+          path: ${{ inputs.WORKING_DIRECTORY }}/cdk.out
+          if-no-files-found: error
+          retention-days: 1
+
+  provision:
+    needs: preview
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.ENV }}
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: ${{ inputs.WORKING_DIRECTORY }}
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: cdk-assembly-${{ inputs.DEPLOYMENT_ID }}
+          path: ${{ inputs.WORKING_DIRECTORY }}/cdk.out
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.NODE_VERSION }}
+      - name: Install AWS CDK CLI
+        run: npm install -g aws-cdk@${{ inputs.CDK_VERSION }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE_ARN }}
+          role-session-name: cdk-deploy
+          aws-region: ${{ inputs.AWS_REGION }}
+      - name: CDK deploy
+        env:
+          CDK_STACKS: ${{ inputs.CDK_STACKS }}
+        run: |
+          read -r -a stacks <<< "$CDK_STACKS"
+          cdk deploy "${stacks[@]}" --app cdk.out --require-approval never

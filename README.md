@@ -49,6 +49,7 @@ consumer repository CDK app. Use this when a service repo owns its deployable
 | `AWS_REGION` | no | `us-east-2` | AWS region for OIDC and CDK. |
 | `IMAGE_TAG` | no | empty | Optional full 40-character lowercase hex commit SHA passed as `-c imageTag=<IMAGE_TAG>`. |
 | `PRIVATE_DEPENDENCY_REPOSITORIES` | no | `platform-infra-toolkit` | Newline-separated private Travtus repositories available to the install step. |
+| `DEPLOYMENT_ID` | no | `cdk` | Safe stable id used to name the reviewed cloud-assembly artifact; callers with multiple deploy jobs must use a unique value per job. |
 
 **Secrets:** `PLATFORM_ADMIN_APP_PRIVATE_KEY`, `AWS_OIDC_ROLE_ARN` (required).
 
@@ -59,6 +60,12 @@ The workflow mints a short-lived GitHub App token scoped to
 for each listed repository. Checkout credentials are not persisted, private
 repository access is verified before `uv sync`, and temporary Git URL rewriting
 is removed when the install step exits.
+
+The workflow synthesizes and runs `cdk diff` in a preview job, then uploads the
+resulting cloud assembly. A second job targets the GitHub Environment named by
+`ENV`, waits for its native protection rules, and deploys that exact assembly.
+Configure required reviewers and deployment-branch rules on UAT/prod
+environments; keep the caller pinned to an immutable workflow commit or release.
 
 **Example:**
 ```yaml
@@ -74,6 +81,7 @@ jobs:
       WORKING_DIRECTORY: .
       IMAGE_TAG: ${{ github.sha }}
       PRIVATE_DEPENDENCY_REPOSITORIES: platform-infra-toolkit
+      DEPLOYMENT_ID: warehouse-uat
 ```
 
 <a id="auto-assign-round-robin"></a>
