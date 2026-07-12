@@ -20,7 +20,7 @@ Budget each of these as its own line with its own driver. They scale differently
 
 ### 1. Model inference (LLM + specialty models)
 
-The obvious layer: hosted API calls, or your own GPU inference. Driver is **tokens (in + out) × calls per task × task volume**. In 2026 the story isn't the falling per-token price — it's that agentic loops, long context, and reasoning tokens push *volume* up faster than price comes down. Don't forget non-LLM models either: speech, vision, rerankers, classifiers, and OCR all carry their own per-call costs.
+The obvious layer: hosted API calls, or your own GPU inference. Driver is **tokens (in + out) × calls per task × task volume**. In 2026 the story isn't the falling per-token price — it's that agentic loops, long context, and reasoning tokens push *volume* up faster than price comes down. Don't forget non-LLM models either: speech, vision, rerankers, classifiers, and OCR all carry their own per-call costs. To size this layer quickly, a dedicated [LLM cost calculator](https://www.stackspend.app/resources/llm-cost-calculator) is a good first input before you fold it into the wider forecast.
 
 ### 2. Embeddings & vector storage
 
@@ -122,6 +122,8 @@ Wrap it in guardrails so the projection stays honest: per-layer budget alerts, p
 Building and maintaining that aggregated, forward-looking view by hand — across model providers, vector stores, warehouses, knowledge graphs, orchestration, developer tooling, and embedded agent usage — is exactly the work that stalls most finance and engineering teams. The data is scattered across a dozen vendors and billing models, and by the time you've reconciled it, it's a month stale.
 
 **This is what StackSpend is built for.** StackSpend brings the whole AI stack into one aggregated view and projects it forward — unifying spend across every layer, attributing cost to features, teams, and drivers, and turning that into scenario-based forecasts you can take to finance. Instead of a token calculator that ignores 60% of the bill, you get the portfolio picture: what you're spending, what's driving it, and where it's headed — updated continuously rather than rebuilt in a spreadsheet each quarter.
+
+If you want a fast, concrete starting point for the inference layer, StackSpend's [LLM cost calculator](https://www.stackspend.app/resources/llm-cost-calculator) lets you model token-driven spend in minutes — a useful first input into the wider full-stack forecast described here.
 
 Forecast the whole stack, aggregate it in one place, and project it forward. That's the discipline — and StackSpend is how companies operationalize it.
 
