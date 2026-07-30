@@ -110,6 +110,27 @@ jobs:
           trap cleanup_git_auth EXIT
           git config --global url."https://x-access-token:${PRIVATE_DEPENDENCY_TOKEN}@github.com/".insteadOf "https://github.com/"
 
+          verify_private_repository() {
+            local repository="$1"
+            local max_attempts=5
+            local attempt=1
+            local delay_seconds=2
+
+            while true; do
+              if git ls-remote --exit-code "https://github.com/${{ github.repository_owner }}/${repository}.git" HEAD >/dev/null; then
+                return 0
+              fi
+              if [ "$attempt" -ge "$max_attempts" ]; then
+                echo "Private dependency repository verification failed after ${max_attempts} attempts: ${repository}" >&2
+                return 1
+              fi
+              echo "Private dependency repository verification attempt ${attempt}/${max_attempts} failed for ${repository}; retrying in ${delay_seconds}s." >&2
+              sleep "$delay_seconds"
+              attempt=$((attempt + 1))
+              delay_seconds=$((delay_seconds * 2))
+            done
+          }
+
           repository_count=0
           while IFS= read -r repository; do
             repository="${repository%$'\r'}"
@@ -118,7 +139,7 @@ jobs:
               echo "Invalid private dependency repository: $repository"
               exit 1
             fi
-            git ls-remote --exit-code "https://github.com/${{ github.repository_owner }}/${repository}.git" HEAD >/dev/null
+            verify_private_repository "$repository"
             repository_count=$((repository_count + 1))
           done <<< "$PRIVATE_DEPENDENCY_REPOSITORIES"
 

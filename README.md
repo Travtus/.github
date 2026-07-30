@@ -59,8 +59,9 @@ consumer repository CDK app. Use this when a service repo owns its deployable
 The workflow mints a short-lived GitHub App token scoped to
 `PRIVATE_DEPENDENCY_REPOSITORIES`. The App installation needs `Contents: Read`
 for each listed repository. Checkout credentials are not persisted, private
-repository access is verified before `uv sync`, and temporary Git URL rewriting
-is removed when the install step exits.
+repository access is verified with bounded exponential backoff before `uv sync`
+to absorb transient GitHub 404s, persistent failures still stop the job, and
+temporary Git URL rewriting is removed when the install step exits.
 
 The workflow synthesizes and runs `cdk diff` in a preview job, then uploads the
 resulting cloud assembly. A second job targets the GitHub Environment named by
