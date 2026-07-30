@@ -25,6 +25,14 @@ def test_private_dependency_credentials_are_ephemeral_and_verified() -> None:
     assert "uv sync --all-groups --frozen" in WORKFLOW
 
 
+def test_private_dependency_verification_retries_with_bounded_backoff() -> None:
+    assert "verify_private_repository()" in WORKFLOW
+    assert "local max_attempts=5" in WORKFLOW
+    assert 'sleep "$delay_seconds"' in WORKFLOW
+    assert "delay_seconds=$((delay_seconds * 2))" in WORKFLOW
+    assert 'verify_private_repository "$repository"' in WORKFLOW
+
+
 def test_image_tag_is_validated_and_passed_to_synth_and_deploy() -> None:
     assert "if: ${{ inputs.IMAGE_TAG != '' }}" in WORKFLOW
     assert '[[ ! "$IMAGE_TAG" =~ ^[0-9a-f]{40}$ ]]' in WORKFLOW
@@ -62,6 +70,7 @@ def test_readme_documents_the_caller_contract() -> None:
 if __name__ == "__main__":
     test_private_dependencies_use_scoped_github_app_auth()
     test_private_dependency_credentials_are_ephemeral_and_verified()
+    test_private_dependency_verification_retries_with_bounded_backoff()
     test_image_tag_is_validated_and_passed_to_synth_and_deploy()
     test_deploy_uses_reviewed_cloud_assembly_after_environment_approval()
     test_plan_only_publishes_diff_without_provisioning()
