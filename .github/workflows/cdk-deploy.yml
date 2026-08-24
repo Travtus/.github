@@ -227,6 +227,7 @@ jobs:
     needs: preview
     if: ${{ !inputs.PLAN_ONLY }}
     runs-on: ubuntu-latest
+    environment: ${{ inputs.ENV }}
     permissions:
       contents: read
       id-token: write

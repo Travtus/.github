@@ -92,7 +92,8 @@ jobs:
               ':(exclude,glob)pyproject.toml' \
               ':(exclude,glob).github/workflows/**' \
               ':(exclude,glob)**/*.hml' \
-              ':(exclude,glob)**/schema.graphql' |
+              ':(exclude,glob)**/connectors/**/schema.graphql' \
+              ':(exclude,glob)**/*-supergraph/**/schema.graphql' |
             awk -F '\t' '
               # FS=\t keeps rename/space paths as NF==3; binaries are "-\t-\t..".
               BEGIN { add = 0; del = 0 }
@@ -105,7 +106,7 @@ jobs:
           )
 
           echo "changed_lines=$CHANGED_LINES" >> "$GITHUB_OUTPUT"
-          echo "Changed lines (excluding markdown, test folders, alembic folders, open_api.yaml, requirements files, lockfiles, pyproject.toml, .github/workflows, generated supergraph metadata (.hml, schema.graphql), and binary files): $CHANGED_LINES"
+          echo "Changed lines (excluding markdown, test folders, alembic folders, open_api.yaml, requirements files, lockfiles, pyproject.toml, .github/workflows, generated supergraph metadata (.hml, connector/supergraph schema.graphql), and binary files): $CHANGED_LINES"
 
       - name: Fail if PR exceeds limit
         # Skipped when the 'large-pr-exception' label is present on the PR.
@@ -121,7 +122,7 @@ jobs:
           echo "Actual: $ACTUAL"
 
           if [ "$ACTUAL" -gt "$LIMIT" ]; then
-            echo "::error::PR is too large: $ACTUAL changed lines (limit: $LIMIT, excluding markdown, test folders, alembic folders, open_api.yaml, requirements files, lockfiles, pyproject.toml, .github/workflows, generated supergraph metadata (.hml, schema.graphql), and binary files). Split this into smaller PRs"
+            echo "::error::PR is too large: $ACTUAL changed lines (limit: $LIMIT, excluding markdown, test folders, alembic folders, open_api.yaml, requirements files, lockfiles, pyproject.toml, .github/workflows, generated supergraph metadata (.hml, connector/supergraph schema.graphql), and binary files). Split this into smaller PRs"
             exit 1
           fi
 

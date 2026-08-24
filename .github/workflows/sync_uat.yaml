@@ -3,11 +3,8 @@ name: Sync main into uat
 on:
   workflow_call:
     secrets:
-      # transitional: accepted so pre-migration callers that still pass it don't fail validation
-      PAT_GITHUB:
-        required: false
       PLATFORM_ADMIN_APP_PRIVATE_KEY:
-        required: false
+        required: true
 
 permissions:
   contents: read

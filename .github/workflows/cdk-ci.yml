@@ -2,6 +2,9 @@ name: CDK CI (lint, types, synth)
 
 on:
   workflow_call:
+    secrets:
+      PLATFORM_ADMIN_APP_PRIVATE_KEY:
+        required: true
     inputs:
       APP:
         type: string
@@ -54,6 +57,7 @@ jobs:
           private-key: ${{ secrets.PLATFORM_ADMIN_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ inputs.DEP_REPOS }}
+          permission-contents: read
       - name: Authenticate git for private dependencies
         env:
           GH_APP_TOKEN: ${{ steps.dep-token.outputs.token }}
@@ -87,6 +91,7 @@ jobs:
           private-key: ${{ secrets.PLATFORM_ADMIN_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ inputs.DEP_REPOS }}
+          permission-contents: read
       - name: Authenticate git for private dependencies
         env:
           GH_APP_TOKEN: ${{ steps.dep-token.outputs.token }}
