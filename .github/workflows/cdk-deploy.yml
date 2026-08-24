@@ -104,11 +104,9 @@ jobs:
           PRIVATE_DEPENDENCY_REPOSITORIES: ${{ inputs.PRIVATE_DEPENDENCY_REPOSITORIES }}
           PRIVATE_DEPENDENCY_TOKEN: ${{ steps.private-dependency-token.outputs.token }}
         run: |
-          cleanup_git_auth() {
-            git config --global --unset-all url."https://x-access-token:${PRIVATE_DEPENDENCY_TOKEN}@github.com/".insteadOf || true
-          }
-          trap cleanup_git_auth EXIT
-          git config --global url."https://x-access-token:${PRIVATE_DEPENDENCY_TOKEN}@github.com/".insteadOf "https://github.com/"
+          auth="$(printf 'x-access-token:%s' "$PRIVATE_DEPENDENCY_TOKEN" | base64 | tr -d '\n')"
+          echo "::add-mask::$auth"
+          git config --global http.https://github.com/.extraheader "AUTHORIZATION: basic $auth"
 
           verify_private_repository() {
             local repository="$1"
@@ -195,7 +193,11 @@ jobs:
           NO_COLOR: "1"
           PLAN_ONLY: ${{ inputs.PLAN_ONLY }}
         run: |
-          read -r -a stacks <<< "$CDK_STACKS"
+          if [ "$CDK_STACKS" = "--all" ]; then
+            stacks=()
+          else
+            read -r -a stacks <<< "$CDK_STACKS"
+          fi
           diff_args=("${stacks[@]}" --app cdk.out)
           if [ "$PLAN_ONLY" = "true" ]; then
             diff_args+=(--no-change-set)
@@ -225,7 +227,6 @@ jobs:
     needs: preview
     if: ${{ !inputs.PLAN_ONLY }}
     runs-on: ubuntu-latest
-    environment: ${{ inputs.ENV }}
     permissions:
       contents: read
       id-token: write
