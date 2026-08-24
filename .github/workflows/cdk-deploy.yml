@@ -106,6 +106,10 @@ jobs:
         run: |
           auth="$(printf 'x-access-token:%s' "$PRIVATE_DEPENDENCY_TOKEN" | base64 | tr -d '\n')"
           echo "::add-mask::$auth"
+          cleanup_git_auth() {
+            git config --global --unset http.https://github.com/.extraheader || true
+          }
+          trap cleanup_git_auth EXIT
           git config --global http.https://github.com/.extraheader "AUTHORIZATION: basic $auth"
 
           verify_private_repository() {
