@@ -1,0 +1,37 @@
+name: Sync main into uat
+
+on:
+  workflow_call:
+    secrets:
+      PLATFORM_ADMIN_APP_PRIVATE_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  sync-uat:
+    name: Merge main into uat
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint Platform Admin token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.PLATFORM_ADMIN_APP_ID }}
+          private-key: ${{ secrets.PLATFORM_ADMIN_APP_PRIVATE_KEY }}
+          # Scope token to the calling repo; app-authored pushes still trigger its workflows
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+      - name: Merge main into uat via GitHub API
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -e
+          if RESPONSE=$(gh api -X POST "repos/${GITHUB_REPOSITORY}/merges" -f base=uat -f head=main -f commit_message="sync: merge main into uat" 2>&1); then
+            echo "main merged into uat (empty response = uat already up to date)"
+          else
+            echo "::error::main -> uat merge failed for ${GITHUB_REPOSITORY}: ${RESPONSE}"
+            echo "::error::Merge conflict? Resolve manually: git checkout uat && git merge main, fix conflicts, push"
+            exit 1
+          fi
