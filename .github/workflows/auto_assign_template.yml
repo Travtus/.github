@@ -24,6 +24,6 @@ jobs:
       - name: Request review based on files changes
         uses: necojackarc/auto-request-review@v0.13.0
         with:
-          token: ${{ secrets.GH_TOKEN || steps.platform-admin-token.outputs.token }}
+          token: ${{ steps.platform-admin-token.outputs.token || secrets.GH_TOKEN }}
           config: reviewer_config.yml
           use_local: true

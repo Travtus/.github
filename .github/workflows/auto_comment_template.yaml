@@ -19,7 +19,7 @@ jobs:
           repositories: ${{ github.event.repository.name }}
       - uses: wow-actions/auto-comment@v1
         with:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN || steps.platform-admin-token.outputs.token }}
+          GITHUB_TOKEN: ${{ steps.platform-admin-token.outputs.token || secrets.GH_TOKEN }}
           pullRequestOpened: |
             # PR Review Checklist
 
