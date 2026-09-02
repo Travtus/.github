@@ -3,15 +3,23 @@ on:
   workflow_call:
     secrets:
       GH_TOKEN:
-        required: true
+        required: false
 
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
+      - name: Mint Platform Admin token
+        id: platform-admin-token
+        if: ${{ secrets.GH_TOKEN == '' }}
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.PLATFORM_ADMIN_APP_ID }}
+          private-key: ${{ secrets.PLATFORM_ADMIN_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
       - uses: wow-actions/auto-comment@v1
         with:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN || steps.platform-admin-token.outputs.token }}
           pullRequestOpened: |
             # PR Review Checklist
 
@@ -26,7 +34,7 @@ jobs:
             **************************************************Security (OWASP top ~10)**************************************************
 
             - [ ] 2. Does not violate OWASP top-10 security concerns or other security concerns - https://owasp.org/Top10
-            
+
             **Code**
 
             - [ ] 3.1 Packages, classes, and methods have a single domain of responsibility.
