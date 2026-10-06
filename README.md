@@ -15,6 +15,7 @@ for automatic comments.
   - [`cdk-deploy.yml`](#cdk-deploy)
   - [`auto_assign_round_robin.yml`](#auto-assign-round-robin)
   - [`pr_size_check.yml`](#pr-size-check)
+  - [`release_source_check.yml`](#release-source-check)
   - [`run-alembic-migrations.yml`](#run-alembic-migrations)
   - [`deploy_ecs_service_to_env.yaml`](#deploy-ecs-service-to-env)
 
@@ -140,6 +141,31 @@ Before enabling the workflow:
 }
 ```
 ````
+
+<a id="release-source-check"></a>
+### `release_source_check.yml` — Release branch source enforcement
+
+Fails a pull request into a long-lived release branch unless it comes from the stage before it in **`develop` → `qa` → `uat` → `main`**. A repository without a stage skips it, so the allowed source is the nearest existing branch before the target:
+
+| Repository branches | `qa` accepts | `uat` accepts | `main` accepts |
+| --- | --- | --- | --- |
+| `develop`, `qa`, `uat`, `main` | `develop` | `qa` | `uat`, `hotfix/*` |
+| `develop`, `uat`, `main` | — | `develop` | `uat`, `hotfix/*` |
+| `develop`, `main` | — | — | `develop`, `hotfix/*` |
+
+Pull requests into any other branch pass without a check, and pull requests from forks into a release branch fail. This stops feature branches from skipping `develop`, which leaves release branches with work `develop` never receives.
+
+**Triggers:** `pull_request` (`opened`, `synchronize`, `reopened`, `edited`, so a retargeted pull request is re-checked)
+
+**Permissions:** `contents: read`. It lists the repository's branches with the workflow's own `GITHUB_TOKEN`; if that lookup fails, the check fails.
+
+**Enabling it.** This is a required workflow, enforced through an organization ruleset rather than called from each repository:
+
+1. Organization → Settings → Repository → Rulesets → New branch ruleset, named `_product-release-source`, with no bypass list.
+2. Target repositories: include `product-*`, and exclude `product-sanity-cms` and `product-gateway-embedded-script`, whose feature branches merge straight into `main`.
+3. Target branches: `qa`, `uat` and `main`.
+4. Rules: **Require workflows to pass before merging** → repository `Travtus/.github`, path `.github/workflows/release_source_check.yml`, pinned to a tag or commit SHA so later edits here do not change enforcement until the ruleset is updated.
+5. Start in **Evaluate** mode, review the rule insights, then switch to **Active**.
 
 <a id="pr-size-check"></a>
 ### `pr_size_check.yml` — PR size enforcement

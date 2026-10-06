@@ -1,0 +1,89 @@
+name: Release Source Check
+
+# Run as an org-ruleset required workflow on the long-lived release branches
+# (qa, uat, main). Each one accepts pull requests only from the stage before
+# it in develop -> qa -> uat -> main, skipping any stage the repository does
+# not have, and main also accepts hotfix/* branches. That keeps feature
+# branches from skipping develop and leaving release branches with work
+# develop never gets.
+
+on:
+  pull_request:
+    # edited: re-check when a pull request is retargeted to another base.
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  enforce-release-source:
+    name: Enforce release source branch
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: ${{ github.repository }}
+      BASE_REF: ${{ github.event.pull_request.base.ref }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+
+    steps:
+      - name: Check the pull request comes from the previous stage
+        shell: bash
+        # Refs and repository names are read from the environment, never
+        # interpolated into the script, so a crafted branch name is only data.
+        run: |
+          set -euo pipefail
+
+          stages=(develop qa uat main)
+
+          base_index=-1
+          for i in "${!stages[@]}"; do
+            if [[ "${stages[$i]}" == "$BASE_REF" ]]; then
+              base_index=$i
+            fi
+          done
+
+          if (( base_index <= 0 )); then
+            echo "'$BASE_REF' is not a release branch; nothing to check."
+            exit 0
+          fi
+
+          # List branches once; a failed lookup fails the check rather than
+          # treating a stage as missing and allowing the wrong source.
+          branches="$(gh api --paginate "repos/$REPOSITORY/branches" --jq '.[].name')"
+
+          previous=""
+          for (( i = base_index - 1; i >= 0; i-- )); do
+            if grep -Fxq -- "${stages[$i]}" <<< "$branches"; then
+              previous="${stages[$i]}"
+              break
+            fi
+          done
+
+          if [[ -z "$previous" ]]; then
+            echo "::error::No earlier stage branch exists to release '$BASE_REF' from."
+            exit 1
+          fi
+
+          allowed="'$previous'"
+          if [[ "$BASE_REF" == "main" ]]; then
+            allowed="$allowed or 'hotfix/*'"
+          fi
+
+          if [[ "$HEAD_REPOSITORY" != "$REPOSITORY" ]]; then
+            echo "::error::Pull requests into '$BASE_REF' must come from $allowed in this repository, not from a fork."
+            exit 1
+          fi
+
+          if [[ "$HEAD_REF" == "$previous" ]]; then
+            echo "'$HEAD_REF' -> '$BASE_REF' follows the release order."
+            exit 0
+          fi
+
+          if [[ "$BASE_REF" == "main" && "$HEAD_REF" == hotfix/* ]]; then
+            echo "'$HEAD_REF' -> main is a hotfix."
+            exit 0
+          fi
+
+          echo "::error::Pull requests into '$BASE_REF' must come from $allowed, not '$HEAD_REF'. Merge your branch into develop and release it through the stages."
+          exit 1
