@@ -38,7 +38,7 @@ env:
 
 jobs:
   build-and-deploy:
-    runs-on: ${{ inputs.ARM_SUPPORT && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.ARM_SUPPORT && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6

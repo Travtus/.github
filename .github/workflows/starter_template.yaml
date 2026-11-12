@@ -90,7 +90,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: ${{ (inputs.ENABLE_POSTGRES_DB) && 'ankane/pgvector' || '' }}
