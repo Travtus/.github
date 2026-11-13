@@ -94,15 +94,34 @@ jobs:
           echo ""
           echo "Waiting for all service deployments to complete (5 min timeout per service)..."
           
+          WAIT_PIDS=()
           for SERVICE_NAME in "${SERVICES_TO_WAIT[@]}"; do
             echo "Waiting for ${SERVICE_NAME} to become stable..."
             timeout 300 aws ecs wait services-stable \
               --cluster "${CLUSTER_NAME}" \
               --services "${SERVICE_NAME}" \
               --region "${REGION}" &
+            WAIT_PIDS+=("$!")
           done
-          
-          wait
-          
+
+          FAILED_SERVICES=()
+          for i in "${!SERVICES_TO_WAIT[@]}"; do
+            SERVICE_NAME="${SERVICES_TO_WAIT[$i]}"
+            STATUS=0
+            wait "${WAIT_PIDS[$i]}" || STATUS=$?
+            if [ "$STATUS" -ne 0 ]; then
+              REASON="failed to become stable (exit ${STATUS})"
+              [ "$STATUS" -eq 124 ] && REASON="timed out after 300s waiting to become stable"
+              echo "::error::${SERVICE_NAME} ${REASON}"
+              FAILED_SERVICES+=("${SERVICE_NAME}")
+            fi
+          done
+
+          if [ ${#FAILED_SERVICES[@]} -gt 0 ]; then
+            echo ""
+            echo "Services not stable in cluster ${CLUSTER_NAME}: ${FAILED_SERVICES[*]}"
+            exit 1
+          fi
+
           echo ""
           echo "All services in cluster ${CLUSTER_NAME} are stable"
