@@ -105,15 +105,15 @@ jobs:
           done
 
           FAILED_SERVICES=()
-          for i in "${!WAIT_PIDS[@]}"; do
+          for i in "${!SERVICES_TO_WAIT[@]}"; do
+            SERVICE_NAME="${SERVICES_TO_WAIT[$i]}"
             STATUS=0
             wait "${WAIT_PIDS[$i]}" || STATUS=$?
-            if [ "$STATUS" -eq 124 ]; then
-              echo "::error::${SERVICES_TO_WAIT[$i]} timed out after 300s waiting to become stable"
-              FAILED_SERVICES+=("${SERVICES_TO_WAIT[$i]}")
-            elif [ "$STATUS" -ne 0 ]; then
-              echo "::error::${SERVICES_TO_WAIT[$i]} failed to become stable (exit ${STATUS})"
-              FAILED_SERVICES+=("${SERVICES_TO_WAIT[$i]}")
+            if [ "$STATUS" -ne 0 ]; then
+              REASON="failed to become stable (exit ${STATUS})"
+              [ "$STATUS" -eq 124 ] && REASON="timed out after 300s waiting to become stable"
+              echo "::error::${SERVICE_NAME} ${REASON}"
+              FAILED_SERVICES+=("${SERVICE_NAME}")
             fi
           done
 
