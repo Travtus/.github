@@ -1,11 +1,19 @@
 # Standard library
 from __future__ import annotations
 
+import http.client
+
 # Third-party
 import pytest
 
 # First-party
-from check_promptlayer_labels import LabelLookupError, find_problems, version_from_response
+import check_promptlayer_labels
+from check_promptlayer_labels import (
+    LabelLookupError,
+    fetch_label_version,
+    find_problems,
+    version_from_response,
+)
 
 VERSIONS = {
     ("aligned", "uat"): 3,
@@ -74,3 +82,32 @@ def test_version_from_response_reads_the_version() -> None:
 def test_version_from_response_rejects_bodies_without_a_version(body: bytes) -> None:
     with pytest.raises(LabelLookupError):
         version_from_response(body)
+
+
+class TruncatedResponse:
+    def __enter__(self) -> TruncatedResponse:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        raise http.client.IncompleteRead(b'{"vers')
+
+
+def test_truncated_response_is_retried_then_reported_for_the_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[object] = []
+
+    def fake_urlopen(request: object, timeout: int) -> TruncatedResponse:
+        calls.append(request)
+        return TruncatedResponse()
+
+    monkeypatch.setattr(check_promptlayer_labels.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(check_promptlayer_labels.time, "sleep", lambda seconds: None)
+
+    with pytest.raises(LabelLookupError, match="aligned: could not resolve label 'uat'"):
+        fetch_label_version("key", "aligned", "uat")
+
+    assert len(calls) == check_promptlayer_labels.ATTEMPTS

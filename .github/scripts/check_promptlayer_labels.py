@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import sys
@@ -85,8 +86,8 @@ def fetch_label_version(api_key: str, name: str, label: str) -> int:
             reason = f"HTTP {error.code}"
             if error.code != 429 and error.code < 500:
                 break
-        except (urllib.error.URLError, TimeoutError, LabelLookupError) as error:
-            reason = str(error)
+        except (OSError, http.client.HTTPException, LabelLookupError) as error:
+            reason = str(error) or type(error).__name__
     raise LabelLookupError(
         f"{name}: could not resolve label '{label}' ({reason}): "
         "missing label, unknown prompt, bad API key or unexpected response."
