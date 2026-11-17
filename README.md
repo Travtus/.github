@@ -18,6 +18,7 @@ for automatic comments.
   - [`release_source_check.yml`](#release-source-check)
   - [`run-alembic-migrations.yml`](#run-alembic-migrations)
   - [`deploy_ecs_service_to_env.yaml`](#deploy-ecs-service-to-env)
+  - [`check_promptlayer_labels.yaml`](#check-promptlayer-labels)
 
 ## Project configuration file
 
@@ -276,4 +277,41 @@ jobs:
       SUBNET_IDS: subnet-aaa,subnet-bbb
       SECURITY_GROUP_ID: sg-123
       RUN_MIGRATIONS: true
+```
+
+<a id="check-promptlayer-labels"></a>
+### `check_promptlayer_labels.yaml` — PromptLayer label release gate
+
+Fails when any prompt listed in the calling repo has its `uat` and `prod` PromptLayer labels pointing to different versions. Use it as a gate on prod deploys so a release cannot go out while a prompt change is still only on `uat`.
+
+**Triggers:** `workflow_call`
+
+List the prompts the repo fetches from PromptLayer in `promptlayer-prompts.txt` at the repo root, one name per line. Blank lines and lines starting with `#` are ignored.
+
+```text
+# promptlayer-prompts.txt
+conversation_summary
+alerts_agent
+```
+
+Every prompt is checked before the job fails, so one run reports every mismatch. A prompt with a missing label, an unknown name, or a PromptLayer API error also fails the job. `name==version` lines are rejected: version pinning is not supported yet.
+
+| Input | Default | Description |
+| --- | --- | --- |
+| `PROMPTS_FILE` | `promptlayer-prompts.txt` | Path to the prompt list in the calling repo |
+| `LABEL_A` | `uat` | Label whose version is the reference |
+| `LABEL_B` | `prod` | Label that must point to the same version |
+
+**Secret:** `PROMPTLAYER_API_KEY`
+
+```yaml
+jobs:
+  prompt-labels:
+    uses: Travtus/.github/.github/workflows/check_promptlayer_labels.yaml@main
+    secrets:
+      PROMPTLAYER_API_KEY: ${{ secrets.PROMPTLAYER_API_KEY }}
+
+  deploy:
+    needs: prompt-labels
+    # ...
 ```
