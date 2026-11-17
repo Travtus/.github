@@ -48,18 +48,20 @@ jobs:
 
           # Prints the version a label points to, or nothing when it cannot be resolved.
           label_version() {
-            local name="$1" label="$2" response status
-            response="$(curl -sS --max-time 30 -w '\n%{http_code}' -X POST \
+            local name="$1" label="$2" response status version=""
+            response="$(curl -sS --max-time 30 --retry 3 -w '\n%{http_code}' -X POST \
               "https://api.promptlayer.com/prompt-templates/$(jq -rn --arg n "$name" '$n|@uri')" \
               -H "X-API-KEY: $PROMPTLAYER_API_KEY" \
               -H 'Content-Type: application/json' \
-              -d "$(jq -n --arg l "$label" '{label: $l}')")"
+              -d "$(jq -n --arg l "$label" '{label: $l}')")" || true
             status="${response##*$'\n'}"
-            if [ "$status" != "200" ]; then
-              echo "::error::$name: PromptLayer returned HTTP $status for label '$label' (missing label, unknown prompt or bad API key)." >&2
-              return 0
+            if [ "$status" = "200" ]; then
+              version="$(jq -r '.version // empty' <<< "${response%$'\n'*}" 2> /dev/null || true)"
             fi
-            jq -r '.version // empty' <<< "${response%$'\n'*}"
+            if [ -z "$version" ]; then
+              echo "::error::$name: could not resolve label '$label' (HTTP ${status:-none}): missing label, unknown prompt, bad API key or unexpected response." >&2
+            fi
+            printf '%s' "$version"
           }
 
           checked=0
