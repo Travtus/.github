@@ -1,0 +1,47 @@
+name: Check PromptLayer labels
+
+on:
+  workflow_call:
+    inputs:
+      PROMPTS_FILE:
+        description: Path in the calling repo to the prompt list, one prompt name per line.
+        type: string
+        default: promptlayer-prompts.txt
+      LABEL_A:
+        description: Label whose version is the reference.
+        type: string
+        default: uat
+      LABEL_B:
+        description: Label that must point to the same version as LABEL_A.
+        type: string
+        default: prod
+    secrets:
+      PROMPTLAYER_API_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  check-promptlayer-labels:
+    name: Verify PromptLayer labels point to the same prompt versions
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout calling repo
+        uses: actions/checkout@v7
+
+      - name: Checkout central automation
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: github-automation
+
+      - name: Compare label versions
+        run: python github-automation/.github/scripts/check_promptlayer_labels.py
+        env:
+          PROMPTLAYER_API_KEY: ${{ secrets.PROMPTLAYER_API_KEY }}
+          PROMPTS_FILE: ${{ inputs.PROMPTS_FILE }}
+          LABEL_A: ${{ inputs.LABEL_A }}
+          LABEL_B: ${{ inputs.LABEL_B }}
