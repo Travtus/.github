@@ -304,6 +304,8 @@ Every prompt is checked before the job fails, so one run reports every mismatch.
 
 **Secret:** `PROMPTLAYER_API_KEY`
 
+The check itself is `.github/scripts/check_promptlayer_labels.py`, which the workflow checks out from this repository at the workflow's own commit, so callers need no Python setup.
+
 ```yaml
 jobs:
   prompt-labels:
