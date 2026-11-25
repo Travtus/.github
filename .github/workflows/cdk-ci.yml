@@ -46,7 +46,7 @@ jobs:
         working-directory: ${{ inputs.WORKING_DIRECTORY }}
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v8.2.0
+      - uses: astral-sh/setup-uv@v10.4.0
         with:
           python-version: ${{ inputs.PYTHON_VERSION }}
       - name: Mint App token for private dependencies
@@ -80,7 +80,7 @@ jobs:
         working-directory: ${{ inputs.WORKING_DIRECTORY }}
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v8.2.0
+      - uses: astral-sh/setup-uv@v10.4.0
         with:
           python-version: ${{ inputs.PYTHON_VERSION }}
       - name: Mint App token for private dependencies

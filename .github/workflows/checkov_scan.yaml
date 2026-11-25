@@ -38,11 +38,11 @@ jobs:
         with:
           token: ${{ env.GITHUB_TOKEN }}
       - name: Set up Python ${{ inputs.PYTHON_VERSION }}
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ inputs.PYTHON_VERSION }}
       - name: Run IaC SOC2 scans with checkov
-        uses: bridgecrewio/checkov-action@master
+        uses: bridgecrewio/checkov-action@v12
         with:
           directory: ${{ inputs.CHECKOV_SCAN_DIRECTORY }}
           framework: ${{ inputs.CHECKOV_SCAN_FRAMEWORK }}

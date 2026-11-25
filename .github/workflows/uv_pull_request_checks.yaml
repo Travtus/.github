@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: ${{ (inputs.ENABLE_POSTGRES_DB) && 'ankane/pgvector' || '' }}
+        image: ${{ (inputs.ENABLE_POSTGRES_DB) && 'pgvector/pgvector:0.8.7-pg18' || '' }}
         env:
           POSTGRES_PASSWORD: postgres
         options: >-
@@ -72,7 +72,7 @@ jobs:
         ports:
           - 5432:5432
       clickhouse:
-        image: ${{ (inputs.ENABLE_CLICKHOUSE_DB) && 'clickhouse/clickhouse-server:25.2.2.39' || '' }}
+        image: ${{ (inputs.ENABLE_CLICKHOUSE_DB) && 'clickhouse/clickhouse-server:26.10.9.12' || '' }}
         options: >-
           --health-cmd "wget --spider -q http://localhost:8123/ping || exit 1"
           --health-interval 10s
@@ -89,7 +89,7 @@ jobs:
         with:
           token: ${{ env.GITHUB_TOKEN }}
       - name: Set up Python ${{ inputs.PYTHON_VERSION }}
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ inputs.PYTHON_VERSION }}
       - name: Install clickhouse-client
@@ -98,7 +98,7 @@ jobs:
           sudo apt update
           sudo apt install -y clickhouse-client
       - name: Install uv
-        uses: astral-sh/setup-uv@v8.2.0
+        uses: astral-sh/setup-uv@v10.4.0
       - name: Install deps via UV
         env:
           GITHUB_TOKEN: ${{ secrets.PAT_GITHUB }}
@@ -108,7 +108,7 @@ jobs:
         run: uv run task format
       - name: Commit changes
         id: commit_changes
-        uses: stefanzweifel/git-auto-commit-action@v4
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           commit_message: Format changed files
       - name: Check if commit
@@ -127,7 +127,7 @@ jobs:
             uv run coverage report --fail-under=${{ inputs.COVERAGE_THRESHOLD }}
       - name: Run IaC SOC2 scans with checkov
         if: ${{ inputs.RUN_CHECKOV_SCAN }}
-        uses: bridgecrewio/checkov-action@master
+        uses: bridgecrewio/checkov-action@v12
         with:
           directory: ${{ inputs.CHECKOV_SCAN_DIRECTORY }}
           framework: ${{ inputs.CHECKOV_SCAN_FRAMEWORK }}

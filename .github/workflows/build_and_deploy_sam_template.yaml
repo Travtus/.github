@@ -34,7 +34,7 @@ on:
         type: string
       PYTHON_VERSION:
         type: string
-        default: '3.8'
+        default: '3.13'
         required: false
       ARM_SUPPORT:
         type: boolean
@@ -55,11 +55,11 @@ env:
 
 jobs:
   deploy-dev:
-    runs-on: ${{ inputs.ARM_SUPPORT && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    runs-on: ${{ inputs.ARM_SUPPORT && 'ubuntu-26.04-arm' || 'ubuntu-latest' }}
     if: ${{ inputs.ENVIRONMENTS == 'dev' || inputs.ENVIRONMENTS == 'all' }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ inputs.PYTHON_VERSION }}
       - uses: aws-actions/setup-sam@v3
@@ -78,7 +78,7 @@ jobs:
       - name: Deploy SAM template
         run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.DEV_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset --resolve-image-repos
   deploy-qa:
-    runs-on: ${{ inputs.ARM_SUPPORT && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    runs-on: ${{ inputs.ARM_SUPPORT && 'ubuntu-26.04-arm' || 'ubuntu-latest' }}
     needs: [deploy-dev]
     if: >
       ${{ always() &&
@@ -86,7 +86,7 @@ jobs:
           (needs.deploy-dev.result == 'success' || needs.deploy-dev.result == 'skipped') }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ inputs.PYTHON_VERSION }}
       - uses: aws-actions/setup-sam@v3
@@ -105,7 +105,7 @@ jobs:
       - name: Deploy SAM template
         run: sam deploy --config-file ${{ inputs.TOML_CONFIG_FILE }} --config-env ${{ inputs.QA_TOML_CONFIG }} --capabilities CAPABILITY_NAMED_IAM --no-confirm-changeset --no-fail-on-empty-changeset --resolve-image-repos
   deploy-uat:
-    runs-on: ${{ inputs.ARM_SUPPORT && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    runs-on: ${{ inputs.ARM_SUPPORT && 'ubuntu-26.04-arm' || 'ubuntu-latest' }}
     needs: [deploy-qa]
     if: >
       ${{ always() &&
@@ -113,7 +113,7 @@ jobs:
           (needs.deploy-qa.result == 'success' || needs.deploy-qa.result == 'skipped') }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ inputs.PYTHON_VERSION }}
       - uses: aws-actions/setup-sam@v3

@@ -45,8 +45,8 @@ def test_deploy_uses_reviewed_cloud_assembly_after_environment_approval() -> Non
     assert "  provision:" in WORKFLOW
     assert "needs: preview" in WORKFLOW
     assert "cdk diff" in WORKFLOW
-    assert "actions/upload-artifact@v6" in WORKFLOW
-    assert "actions/download-artifact@v7" in WORKFLOW
+    assert "actions/upload-artifact@v7" in WORKFLOW
+    assert "actions/download-artifact@v8" in WORKFLOW
     assert "environment: ${{ inputs.ENV }}" in WORKFLOW
     assert "--app cdk.out" in WORKFLOW
     assert WORKFLOW.index("uv run cdk diff") < WORKFLOW.index("- name: CDK deploy")

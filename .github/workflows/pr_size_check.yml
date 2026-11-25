@@ -138,7 +138,7 @@ jobs:
 
       - name: Require Platform Admin review for large PR exception
         if: ${{ env.HAS_LARGE_PR_EXCEPTION == 'true' }}
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           github-token: ${{ steps.platform-admin-token.outputs.token }}
           script: |
