@@ -22,7 +22,7 @@ on:
         type: string
       PYTHON_VERSION:
         type: string
-        default: "3.8"
+        default: "3.13"
         required: false
       SAM_STACK_NAME:
         type: string
@@ -63,7 +63,7 @@ env:
 
 jobs:
   build-and-deploy:
-    runs-on: ${{ inputs.ARM_SUPPORT && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    runs-on: ${{ inputs.ARM_SUPPORT && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
         with:
