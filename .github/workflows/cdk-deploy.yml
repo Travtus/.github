@@ -76,10 +76,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@v8.2.0
+      - uses: astral-sh/setup-uv@v10.4.0
         with:
           python-version: ${{ inputs.PYTHON_VERSION }}
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ inputs.NODE_VERSION }}
       - name: Install AWS CDK CLI
@@ -220,7 +220,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$diff_status"
       - name: Upload reviewed cloud assembly
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: cdk-assembly-${{ inputs.DEPLOYMENT_ID }}
           path: ${{ inputs.WORKING_DIRECTORY }}/cdk.out
@@ -239,11 +239,11 @@ jobs:
       run:
         working-directory: ${{ inputs.WORKING_DIRECTORY }}
     steps:
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: cdk-assembly-${{ inputs.DEPLOYMENT_ID }}
           path: ${{ inputs.WORKING_DIRECTORY }}/cdk.out
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ inputs.NODE_VERSION }}
       - name: Install AWS CDK CLI
