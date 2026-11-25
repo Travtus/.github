@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: ${{ (inputs.ENABLE_POSTGRES_DB) && 'ankane/pgvector' || '' }}
+        image: ${{ (inputs.ENABLE_POSTGRES_DB) && 'pgvector/pgvector:0.8.7-pg18' || '' }}
         env:
           POSTGRES_PASSWORD: postgres
         options: >-
@@ -72,7 +72,7 @@ jobs:
         ports:
           - 5432:5432
       clickhouse:
-        image: ${{ (inputs.ENABLE_CLICKHOUSE_DB) && 'clickhouse/clickhouse-server:25.2.2.39' || '' }}
+        image: ${{ (inputs.ENABLE_CLICKHOUSE_DB) && 'clickhouse/clickhouse-server:26.10.9.12' || '' }}
         options: >-
           --health-cmd "wget --spider -q http://localhost:8123/ping || exit 1"
           --health-interval 10s
