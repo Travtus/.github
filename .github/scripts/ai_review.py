@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import html
+import http.client
 import json
+import os
 import re
+import sys
 import unicodedata
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping
+from functools import partial
 from pathlib import Path
 from typing import Any, Literal, TypedDict
+from urllib.error import HTTPError
 
 STICKY_MARKER = "<!-- ai-review:sticky -->"
+UNAVAILABLE_TITLE = "## AI review unavailable"
+BOT_LOGIN = "github-actions[bot]"
 MAX_ISSUES = 15
 MAX_CHANGES = 20
 MAX_TEXT = 1000
@@ -39,6 +46,12 @@ ORDERED_LIST_START = re.compile(r"(?m)^([ \t]*\d{1,9})([.)])")
 MARKDOWN_ESCAPE = re.compile(r"\\([!-/:-@\[-`{-~])")
 ESCAPE_OR_ENTITY = re.compile(r"\\.|&#?\w+;|.", re.DOTALL)
 TRUNCATION = "\u2026truncated"
+JsonDict = dict[str, Any]
+JsonValue = Any
+RequestFunc = Callable[[str, str, JsonDict | None], JsonValue]
+HTML_TAG = re.compile(r"<[^>]*>")
+REQUIRED_ENV = ("GITHUB_TOKEN", "GITHUB_REPOSITORY", "PR_NUMBER", "REVIEWED_SHA", "REVIEW_RESULT")
+JOB_FAILURES = {"failure": "review job failed", "cancelled": "review job cancelled or timed out"}
 JSON_TYPES = {"object": dict, "array": list, "string": str, "null": type(None)}
 
 
@@ -207,20 +220,51 @@ def _fit(body: str) -> str:
     return head[: head.rfind("\n") + 1] + suffix
 
 
+def _within_limit(lines: list[str]) -> bool:
+    return _utf16_units("\n".join(lines) + "\n") <= MAX_BODY
+
+
+def _longest_prefix(before: list[str], items: list[str], after: list[str]) -> int:
+    kept = 0
+    while kept < len(items) and _within_limit(before + items[: kept + 1] + after):
+        kept += 1
+    return kept
+
+
+def _omitted_note(count: int) -> list[str]:
+    return ["", f"{count} more issues omitted"]
+
+
+def _issue_lines(head: list[str], issues: list[Issue]) -> list[str]:
+    if not issues:
+        return ["No issues found."]
+    table = ["**Issues**", "", "| Severity | Location | Issue | Fix |", "|---|---|---|---|"]
+    rows = [_issue_row(issue) for issue in issues]
+    kept = _longest_prefix(head + table, rows, [])
+    if kept < len(rows):
+        kept = _longest_prefix(head + table, rows, _omitted_note(len(rows)))
+    omitted = len(rows) - kept
+    return table + rows[:kept] + (_omitted_note(omitted) if omitted else [])
+
+
+def _change_lines(head: list[str], changes: list[str], issue_lines: list[str]) -> list[str]:
+    items = [f"- {_line(change)}" for change in changes]
+    kept = _longest_prefix(head + ["**Changes**", ""], items, [""] + issue_lines)
+    return ["**Changes**", "", *items[:kept], ""] if kept else []
+
+
+def _reviewed_line(sha: str) -> str:
+    return f"Reviewed commit {_code(sha)}"
+
+
 def render_sticky(review: Review, reviewed_sha: str, notice: str = "") -> str:
     icon = VERDICT_ICONS[review["verdict"]]
-    lines = [STICKY_MARKER, f"## {icon} AI review: {review['verdict']}", ""]
-    lines += [notice, ""] if notice else []
-    lines += [f"Reviewed commit {_code(reviewed_sha)}", ""]
-    if review["changes"]:
-        lines += ["**Changes**", ""]
-        lines += [f"- {_line(change)}" for change in review["changes"]] + [""]
-    if review["issues"]:
-        lines += ["**Issues**", "", "| Severity | Location | Issue | Fix |", "|---|---|---|---|"]
-        lines += [_issue_row(issue) for issue in review["issues"]]
-    else:
-        lines.append("No issues found.")
-    return _fit("\n".join(lines) + "\n")
+    head = [STICKY_MARKER, f"## {icon} AI review: {review['verdict']}", ""]
+    head += [notice, ""] if notice else []
+    head += [_reviewed_line(reviewed_sha), ""]
+    issue_lines = _issue_lines(head, review["issues"])
+    changes = _change_lines(head, review["changes"], issue_lines)
+    return _fit("\n".join(head + changes + issue_lines) + "\n")
 
 
 def render_stale(review: Review, reviewed_sha: str, head_sha: str) -> str:
@@ -234,11 +278,20 @@ def render_stale(review: Review, reviewed_sha: str, head_sha: str) -> str:
 def render_unavailable(reason: str, reviewed_sha: str) -> str:
     return (
         f"{STICKY_MARKER}\n"
-        "## AI review unavailable\n\n"
+        f"{UNAVAILABLE_TITLE}\n\n"
         f"AI review unavailable: {_line(reason)}\n\n"
         f"Commit {_code(reviewed_sha)}: the reviewer will review on the next push, "
         "or re-run this job.\n"
     )
+
+
+def _find_body_leak(body: str, secrets: list[str]) -> str | None:
+    displayed = html.unescape(MARKDOWN_ESCAPE.sub(r"\1", body))
+    return find_leak(body, secrets) or find_leak(displayed, secrets)
+
+
+def _withheld(reason: str, reviewed_sha: str) -> str:
+    return render_unavailable(f"output withheld ({reason})", reviewed_sha)
 
 
 def publishable_body(review: Review, reviewed_sha: str, head_sha: str, secrets: list[str]) -> str:
@@ -251,8 +304,183 @@ def publishable_body(review: Review, reviewed_sha: str, head_sha: str, secrets: 
             if stale
             else render_sticky(review, reviewed_sha)
         )
-        displayed = html.unescape(MARKDOWN_ESCAPE.sub(r"\1", body))
-        reason = find_leak(body, secrets) or find_leak(displayed, secrets)
+        reason = _find_body_leak(body, secrets)
         if reason is None:
             return body
-    return render_unavailable(f"output withheld ({reason})", reviewed_sha)
+    return _withheld(reason, reviewed_sha)
+
+
+class PublishGithub:
+    def __init__(
+        self,
+        token: str,
+        request_func: RequestFunc | None = None,
+        connection_factory: Callable[..., Any] = http.client.HTTPSConnection,
+    ) -> None:
+        self.token = token
+        self._connection_factory = connection_factory
+        self._request_func = request_func or self._request
+        self._markdown_func = request_func or partial(
+            self._request, accept="text/html", decode=False
+        )
+
+    def pull_head_sha(self, repo: str, number: int) -> str:
+        return self._request_func("GET", f"/repos/{repo}/pulls/{number}", None)["head"]["sha"]
+
+    def list_comments(self, repo: str, number: int) -> list[JsonDict]:
+        return self._paginate(f"/repos/{repo}/issues/{number}/comments")
+
+    def create_comment(self, repo: str, number: int, body: str) -> None:
+        self._request_func("POST", f"/repos/{repo}/issues/{number}/comments", {"body": body})
+
+    def update_comment(self, repo: str, comment_id: int, body: str) -> None:
+        self._request_func("PATCH", f"/repos/{repo}/issues/comments/{comment_id}", {"body": body})
+
+    def render_markdown(self, repo: str, text: str) -> str:
+        payload = {"text": text, "mode": "gfm", "context": repo}
+        return self._markdown_func("POST", "/markdown", payload)
+
+    def _paginate(self, path: str) -> list[JsonDict]:
+        page = 1
+        results: list[JsonDict] = []
+        while True:
+            response = self._request_func("GET", f"{path}?per_page=100&page={page}", None)
+            if not isinstance(response, list):
+                raise TypeError(f"Expected list response from {path}")
+            results.extend(response)
+            if len(response) < 100:
+                return results
+            page += 1
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        body: JsonDict | None = None,
+        accept: str = "application/vnd.github+json",
+        decode: bool = True,
+    ) -> JsonValue:
+        connection = self._connection_factory("api.github.com", timeout=20)
+        connection.request(
+            method,
+            path,
+            body=json.dumps(body) if body is not None else None,
+            headers={
+                "Accept": accept,
+                "Authorization": f"Bearer {self.token}",
+                "Content-Type": "application/json",
+                "User-Agent": "travtus-ai-review",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        response = connection.getresponse()
+        text = response.read().decode()
+        if response.status >= 400:
+            raise HTTPError(path, response.status, response.reason, response.headers, None)
+        return (json.loads(text) if text else {}) if decode else text
+
+
+def safe_body(github: PublishGithub, repo: str, body: str, reviewed_sha: str) -> str:
+    reason = _find_body_leak(body, [])
+    if reason is None:
+        rendered = github.render_markdown(repo, body)
+        visible = html.unescape(HTML_TAG.sub("", rendered))
+        if leak := find_leak([rendered, visible], []):
+            reason = f"rendered {leak}"
+    if reason is None:
+        return body
+    return _withheld(reason, reviewed_sha)
+
+
+def _is_own_sticky(comment: JsonDict) -> bool:
+    user = comment.get("user") or {}
+    return comment["body"].splitlines()[:1] == [STICKY_MARKER] and user.get("login") == BOT_LOGIN
+
+
+def _own_stickies(github: PublishGithub, repo: str, number: int) -> list[JsonDict]:
+    return [c for c in github.list_comments(repo, number) if _is_own_sticky(c)]
+
+
+def upsert_sticky(github: PublishGithub, repo: str, number: int, body: str) -> None:
+    for attempt in range(2):
+        stickies = _own_stickies(github, repo, number)
+        outdated = [c for c in stickies if c["body"] != body]
+        try:
+            if not stickies:
+                github.create_comment(repo, number, body)
+            for sticky in outdated:
+                github.update_comment(repo, sticky["id"], body)
+            return
+        except (HTTPError, OSError, http.client.HTTPException) as error:
+            if attempt or (isinstance(error, HTTPError) and error.code < 500):
+                raise
+
+
+def _upsert_review(
+    github: PublishGithub, repo: str, number: int, review: Review, reviewed_sha: str, head_sha: str
+) -> str:
+    body = publishable_body(review, reviewed_sha, head_sha, [])
+    body = safe_body(github, repo, body, reviewed_sha)
+    upsert_sticky(github, repo, number, body)
+    return body
+
+
+def publish(
+    github: PublishGithub, repo: str, number: int, reviewed_sha: str, result: Review | str
+) -> None:
+    head = github.pull_head_sha(repo, number)
+    if isinstance(result, str):
+        if head == reviewed_sha:
+            body = safe_body(github, repo, render_unavailable(result, reviewed_sha), reviewed_sha)
+            upsert_sticky(github, repo, number, body)
+        return
+    if head != reviewed_sha:
+        reviewed_line = _reviewed_line(reviewed_sha)
+        stickies = _own_stickies(github, repo, number)
+        if all(reviewed_line in sticky["body"].splitlines() for sticky in stickies):
+            _upsert_review(github, repo, number, result, reviewed_sha, head)
+        return
+    body = _upsert_review(github, repo, number, result, reviewed_sha, head)
+    if body != render_sticky(result, reviewed_sha):
+        return
+    latest = github.pull_head_sha(repo, number)
+    if latest != reviewed_sha:
+        _upsert_review(github, repo, number, result, reviewed_sha, latest)
+
+
+def _result_from_env(env: Mapping[str, str]) -> Review | str:
+    status = env["REVIEW_RESULT"]
+    if status in JOB_FAILURES:
+        return JOB_FAILURES[status]
+    if status != "success":
+        raise SystemExit(f"Unexpected REVIEW_RESULT: {status}")
+    outcome = env.get("OUTCOME", "")
+    if outcome != "ok":
+        return outcome or "no review outcome"
+    try:
+        return validate(env.get("FINDINGS", ""))
+    except InvalidOutputError:
+        return "invalid agent output"
+
+
+def publish_from_env(env: Mapping[str, str], github: PublishGithub) -> None:
+    missing = [name for name in REQUIRED_ENV if not env.get(name)]
+    if missing:
+        raise SystemExit(f"Missing required environment variables: {', '.join(missing)}")
+    if env["REVIEW_RESULT"] == "skipped":
+        return
+    try:
+        number = int(env["PR_NUMBER"])
+    except ValueError:
+        raise SystemExit(f"PR_NUMBER is not a number: {env['PR_NUMBER']!r}") from None
+    result = _result_from_env(env)
+    publish(github, env["GITHUB_REPOSITORY"], number, env["REVIEWED_SHA"], result)
+
+
+def main(env: Mapping[str, str] = os.environ, github: PublishGithub | None = None) -> int:
+    publish_from_env(env, github or PublishGithub(env.get("GITHUB_TOKEN", "")))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
