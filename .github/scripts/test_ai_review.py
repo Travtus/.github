@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
+from http.client import IncompleteRead, RemoteDisconnected
 from typing import Any
+from urllib.error import HTTPError
 
 import pytest
 
@@ -13,9 +16,16 @@ from ai_review import (
     MAX_TEXT,
     SCHEMA,
     STICKY_MARKER,
+    TRUNCATION,
+    UNAVAILABLE_TITLE,
     InvalidOutputError,
+    PublishGithub,
     _fit,
+    _utf16_units,
     find_leak,
+    main,
+    publish,
+    publish_from_env,
     publishable_body,
     render_stale,
     render_sticky,
@@ -150,6 +160,34 @@ def test_leak_scan_sees_secrets_that_rendering_would_rejoin(
     review = make_review(issues=[make_issue(path=split_by(secret, invisible))])
 
     assert find_leak(review, secrets) is not None
+
+
+IGNORABLE_MARKS = [
+    0x17B4,
+    0x17B5,
+    0x180B,
+    0x180D,
+    0x180F,
+    0xFE00,
+    0xFE0F,
+    0xFFF0,
+    0xFFF8,
+    0xE0000,
+    0xE0101,
+    0xE01EF,
+    0xE0FFF,
+]
+AWS_KEY = "AKIA" + "IOSFODNN7EXAMPLE"
+
+
+@pytest.mark.parametrize("mark", IGNORABLE_MARKS, ids=hex)
+def test_default_ignorable_marks_cannot_hide_a_credential(mark: int) -> None:
+    split = split_by(AWS_KEY, chr(mark))
+    review = make_review(changes=[split], issues=[make_issue(fix=split)])
+
+    assert find_leak(review, []) == "AWS access key pattern"
+    withheld = render_unavailable("output withheld (AWS access key pattern)", SHA)
+    assert publishable_body(review, SHA, SHA, []) == withheld
 
 
 @pytest.mark.parametrize("invisible", INVISIBLES)
@@ -527,7 +565,6 @@ def test_oversized_body_is_trimmed_at_a_line_boundary(fill: str) -> None:
     for body in bodies:
         assert len(body) <= 64_536
         assert len(body.encode("utf-16-le")) // 2 <= 65536
-        assert body.endswith("\n\n\u2026truncated\n")
         assert body.startswith(STICKY_MARKER)
         assert all(line.endswith("|") for line in body.splitlines() if line.startswith("|"))
 
@@ -619,3 +656,555 @@ def test_publishable_body_renders_a_clean_review_unchanged(head_sha: str, render
     review = make_review()
 
     assert publishable_body(review, SHA, head_sha, [SECRET]) == render(review)
+
+
+def test_unavailable_body_has_the_title_on_line_two() -> None:
+    assert render_unavailable("busy", SHA).splitlines()[:2] == [STICKY_MARKER, UNAVAILABLE_TITLE]
+
+
+RENDERS = [
+    pytest.param(lambda review: render_sticky(review, SHA), id="current"),
+    pytest.param(lambda review: render_stale(review, SHA, NEW_HEAD), id="stale"),
+]
+
+
+@pytest.mark.parametrize("render", RENDERS)
+@pytest.mark.parametrize(("change_count", "issue_count"), [(20, 15), (0, 60), (20, 60)])
+def test_issue_rows_get_budget_before_changes(
+    render: Any, change_count: int, issue_count: int
+) -> None:
+    changes = ["\U0001f7e2" * MAX_TEXT] * change_count
+    issues = [
+        make_issue(issue=f"issue {n} " + "x" * 900, fix="y" * 900) for n in range(issue_count)
+    ]
+
+    body = render(make_review(changes=changes, issues=issues))
+
+    rows = [line for line in body.splitlines() if line.startswith("| required")]
+    omitted = re.search(r"(\d+) more issues omitted", body)
+    assert _utf16_units(body) <= MAX_BODY
+    assert TRUNCATION not in body
+    assert all(f"issue {n} " in row for n, row in enumerate(rows))
+    assert len(rows) + (int(omitted[1]) if omitted else 0) == issue_count
+    assert (omitted is None) == (issue_count == 15)
+    assert (
+        sum(line.startswith("- ") for line in body.splitlines()) < change_count or not change_count
+    )
+
+
+@pytest.mark.parametrize(
+    ("stale", "fix_length"), [(False, 896), (True, 891)], ids=["current", "stale"]
+)
+def test_the_omitted_note_is_budgeted_with_the_rows(stale: bool, fix_length: int) -> None:
+    issues = [make_issue(issue=f"issue {n} " + "x" * 900, fix="y" * fix_length) for n in range(60)]
+    review = make_review(changes=[], issues=issues)
+
+    body = render_stale(review, SHA, NEW_HEAD) if stale else render_sticky(review, SHA)
+
+    assert TRUNCATION not in body
+    assert body.endswith(" more issues omitted\n")
+
+
+def test_render_sticky_never_exceeds_the_body_limit() -> None:
+    body = render_sticky(make_review(), SHA, "n" * (2 * MAX_BODY))
+
+    assert _utf16_units(body) <= MAX_BODY
+    assert body.endswith(TRUNCATION + "\n")
+
+
+def test_issue_rows_that_fit_without_the_head_are_still_budgeted_with_it() -> None:
+    issues = [make_issue(issue=f"issue {n} " + "x" * 900, fix="y" * 900) for n in range(34)]
+
+    body = render_sticky(make_review(changes=[], issues=issues), SHA, "n" * 2000)
+
+    assert TRUNCATION not in body
+    assert body.endswith("1 more issues omitted\n")
+
+
+REPO = "Travtus/example"
+PR = 7
+
+
+class FakeConnection:
+    def __init__(self, status: int, payload: str) -> None:
+        self.status = status
+        self.reason = "reason"
+        self.headers: dict[str, str] = {}
+        self.payload = payload
+        self.sent: list[tuple[str, str, str | None, dict[str, str]]] = []
+
+    def request(self, method: str, path: str, body: str | None, headers: dict[str, str]) -> None:
+        self.sent.append((method, path, body, headers))
+
+    def getresponse(self) -> FakeConnection:
+        return self
+
+    def read(self) -> bytes:
+        return self.payload.encode()
+
+
+def transport(status: int, payload: str) -> tuple[PublishGithub, FakeConnection]:
+    connection = FakeConnection(status, payload)
+    return PublishGithub("tok", connection_factory=lambda *args, **kwargs: connection), connection
+
+
+def test_markdown_transport_returns_html_text() -> None:
+    github, connection = transport(200, "<h1>hi</h1>")
+
+    assert github.render_markdown(REPO, "# hi") == "<h1>hi</h1>"
+
+    [(method, path, body, headers)] = connection.sent
+    assert (method, path) == ("POST", "/markdown")
+    assert json.loads(body or "") == {"text": "# hi", "mode": "gfm", "context": REPO}
+    assert headers["Accept"] == "text/html"
+    assert headers["Authorization"] == "Bearer tok"
+
+
+def test_json_transport_decodes_the_response() -> None:
+    github, connection = transport(200, json.dumps({"head": {"sha": SHA}}))
+
+    assert github.pull_head_sha(REPO, PR) == SHA
+
+    [(method, path, body, headers)] = connection.sent
+    assert (method, path, body) == ("GET", f"/repos/{REPO}/pulls/{PR}", None)
+    assert headers["Accept"] == "application/vnd.github+json"
+
+
+@pytest.mark.parametrize("status", [400, 404, 502])
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda github: github.render_markdown(REPO, "x"),
+        lambda github: github.pull_head_sha(REPO, PR),
+    ],
+    ids=["markdown", "json"],
+)
+def test_transport_raises_http_error_on_a_failure_status(
+    call: Callable[[PublishGithub], object], status: int
+) -> None:
+    github, _ = transport(status, "")
+
+    with pytest.raises(HTTPError) as error:
+        call(github)
+
+    assert error.value.code == status
+
+
+BOT = "github-actions[bot]"
+COMMENTS = f"/repos/{REPO}/issues/{PR}/comments"
+HEAD = f"/repos/{REPO}/pulls/{PR}"
+
+
+def comment(body: str, comment_id: int, login: str = BOT) -> dict[str, Any]:
+    return {"id": comment_id, "body": body, "user": {"login": login}}
+
+
+class FakeApi:
+    def __init__(
+        self,
+        comments: list[dict[str, Any]] | None = None,
+        heads: list[str] | None = None,
+        render: Callable[[str], str] | None = None,
+    ) -> None:
+        self.comments = list(comments or [])
+        self.heads = heads or [SHA]
+        self.render = render or (lambda text: re.sub(r"\\(.)", r"\1", text))
+        self.faults: list[tuple[BaseException, str]] = []
+        self.late: list[Callable[[], None]] = []
+        self.calls: list[tuple[str, str, Any]] = []
+
+    def __call__(self, method: str, path: str, body: dict[str, Any] | None) -> Any:
+        self.calls.append((method, path, body))
+        if path == "/markdown":
+            return self.render(body["text"])
+        if method != "GET":
+            return self.write(method, path, body)
+        if path == HEAD:
+            return {"head": {"sha": self.heads.pop(0) if len(self.heads) > 1 else self.heads[0]}}
+        page = int(path.rsplit("page=", 1)[1])
+        listed = self.comments[(page - 1) * 100 : page * 100]
+        while self.late:
+            self.late.pop()()
+        return listed
+
+    def write(self, method: str, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        def apply() -> None:
+            if method == "POST":
+                next_id = max((c["id"] for c in self.comments), default=0) + 1
+                self.comments.append(comment(body["body"], next_id))
+                return
+            target = int(path.rsplit("/", 1)[1])
+            next(c for c in self.comments if c["id"] == target)["body"] = body["body"]
+
+        if self.faults:
+            error, mode = self.faults.pop(0)
+            if mode == "applied":
+                apply()
+            elif mode == "late":
+                self.late.append(apply)
+            raise error
+        apply()
+        return {}
+
+    def writes(self) -> list[tuple[str, str]]:
+        return [(m, p) for m, p, _ in self.calls if m != "GET" and p != "/markdown"]
+
+    def stickies(self) -> list[str]:
+        return [c["body"] for c in self.comments if c["body"].startswith(STICKY_MARKER)]
+
+
+def publish_to(api: FakeApi, result: dict[str, Any] | str) -> None:
+    publish(PublishGithub("tok", request_func=api), REPO, PR, SHA, result)
+
+
+OLD_STICKY = render_sticky(make_review(verdict="approve"), SHA)
+NEWER_STICKY = render_sticky(make_review(verdict="approve"), NEW_HEAD)
+UNAVAILABLE_FOR_HEAD = render_unavailable("busy", NEW_HEAD)
+WITHHELD_FOR_HEAD = render_unavailable("output withheld (GitHub token pattern)", NEW_HEAD)
+OLDER_STICKY = render_sticky(make_review(verdict="approve"), "b" * 40)
+NEWER_STALE = render_stale(make_review(verdict="approve"), NEW_HEAD, "c" * 40)
+PATCH_FIRST = [("PATCH", f"/repos/{REPO}/issues/comments/1")]
+
+
+@pytest.mark.parametrize(
+    ("comments", "expected"),
+    [
+        ([], [("POST", COMMENTS)]),
+        ([comment(OLD_STICKY, 1)], PATCH_FIRST),
+        ([comment(OLDER_STICKY, 1)], PATCH_FIRST),
+        ([comment(NEWER_STICKY, 1)], []),
+        ([comment(NEWER_STALE, 1)], []),
+        ([comment(UNAVAILABLE_FOR_HEAD, 1)], []),
+        ([comment(WITHHELD_FOR_HEAD, 1)], []),
+        ([comment(OLD_STICKY, 1), comment(NEWER_STICKY, 2)], []),
+    ],
+    ids=[
+        "no-sticky",
+        "sticky-for-this-commit",
+        "sticky-for-an-older-commit",
+        "sticky-for-the-head",
+        "stale-sticky-for-the-head",
+        "unavailable-sticky-for-the-head",
+        "withheld-sticky-for-the-head",
+        "mixed",
+    ],
+)
+def test_publish_on_a_moved_head_never_overwrites_a_newer_review(
+    comments: list[dict[str, Any]], expected: list[tuple[str, str]]
+) -> None:
+    api = FakeApi(comments=comments, heads=[NEW_HEAD])
+
+    publish_to(api, make_review())
+
+    assert api.writes() == expected
+    assert (render_stale(make_review(), SHA, NEW_HEAD) in api.stickies()) is bool(expected)
+    assert [path for _, path, _ in api.calls].count(HEAD) == 1
+
+
+def test_publish_on_a_moved_head_skips_an_unavailable_notice() -> None:
+    api = FakeApi(heads=[NEW_HEAD])
+
+    publish_to(api, "busy")
+
+    assert api.calls == [("GET", HEAD, None)]
+
+
+@pytest.mark.parametrize(
+    "review",
+    [make_review(), make_review(verdict="approve", changes=[], issues=[])],
+    ids=["issues", "clean"],
+)
+def test_post_check_marks_sticky_stale(review: dict[str, Any]) -> None:
+    api = FakeApi(heads=[SHA, NEW_HEAD])
+
+    publish_to(api, review)
+
+    assert api.stickies() == [render_stale(review, SHA, NEW_HEAD)]
+    assert api.writes() == [("POST", COMMENTS), ("PATCH", f"/repos/{REPO}/issues/comments/1")]
+
+
+@pytest.mark.parametrize(
+    "result",
+    ["busy", make_review(changes=[f"see {TOKEN}"])],
+    ids=["unavailable", "withheld"],
+)
+def test_post_check_is_skipped_when_the_sticky_is_not_a_review(
+    result: dict[str, Any] | str,
+) -> None:
+    api = FakeApi(heads=[SHA, NEW_HEAD])
+
+    publish_to(api, result)
+
+    assert api.writes() == [("POST", COMMENTS)]
+    assert [path for _, path, _ in api.calls].count(HEAD) == 1
+    assert "stale" not in api.stickies()[0].lower()
+
+
+BOT_STICKY = render_sticky(make_review(), SHA)
+NOISE = [comment("noise", n, "someone") for n in range(100)]
+
+
+@pytest.mark.parametrize(
+    ("comments", "expected"),
+    [
+        ([], [("POST", COMMENTS)]),
+        ([comment(f"{STICKY_MARKER}\nhuman", 1, "someone")], [("POST", COMMENTS)]),
+        ([comment(f"hello\n{STICKY_MARKER}", 1)], [("POST", COMMENTS)]),
+        ([comment(f"{STICKY_MARKER} extra", 1)], [("POST", COMMENTS)]),
+        (
+            [comment(f"{STICKY_MARKER}\nhuman", 1, "someone"), comment(f"{STICKY_MARKER}\nold", 2)],
+            [("PATCH", f"/repos/{REPO}/issues/comments/2")],
+        ),
+        (
+            [comment(f"{STICKY_MARKER}\nold", 1), comment(f"{STICKY_MARKER}\nolder", 2)],
+            [
+                ("PATCH", f"/repos/{REPO}/issues/comments/1"),
+                ("PATCH", f"/repos/{REPO}/issues/comments/2"),
+            ],
+        ),
+        (
+            [comment(BOT_STICKY, 1), comment(f"{STICKY_MARKER}\nold", 2)],
+            [("PATCH", f"/repos/{REPO}/issues/comments/2")],
+        ),
+        ([{"id": 1, "body": BOT_STICKY, "user": None}], [("POST", COMMENTS)]),
+        ([comment(BOT_STICKY, 1)], []),
+        (
+            [*NOISE, comment(f"{STICKY_MARKER}\nold", 500)],
+            [("PATCH", f"/repos/{REPO}/issues/comments/500")],
+        ),
+    ],
+    ids=[
+        "none",
+        "human-marker-on-line-one",
+        "bot-marker-mid-body",
+        "bot-marker-not-first-line",
+        "skips-human-patches-bot",
+        "patches-every-bot-sticky",
+        "patches-only-outdated-copies",
+        "deleted-user",
+        "unchanged",
+        "bot-sticky-on-page-two",
+    ],
+)
+def test_publish_patches_own_sticky_not_foreign_marker(
+    comments: list[dict[str, Any]], expected: list[tuple[str, str]]
+) -> None:
+    api = FakeApi(comments=comments)
+
+    publish_to(api, make_review())
+
+    assert api.writes() == expected
+
+
+ERRORS = [
+    pytest.param(TimeoutError(), id="timeout"),
+    pytest.param(HTTPError("u", 502, "bad gateway", None, None), id="502"),
+    pytest.param(RemoteDisconnected(), id="remote-disconnected"),
+    pytest.param(IncompleteRead(b""), id="incomplete-read"),
+]
+
+
+@pytest.mark.parametrize("existing", [False, True], ids=["post", "patch"])
+@pytest.mark.parametrize("error", ERRORS)
+def test_lost_response_reconciles_without_duplicate(error: BaseException, existing: bool) -> None:
+    api = FakeApi(comments=[comment(render_unavailable("old", SHA), 1)] if existing else [])
+    api.faults = [(error, "applied")]
+
+    publish_to(api, make_review())
+
+    assert api.stickies() == [BOT_STICKY]
+
+
+@pytest.mark.parametrize("existing", [False, True], ids=["post", "patch"])
+@pytest.mark.parametrize("error", ERRORS)
+def test_absent_after_timeout_retries_once(error: BaseException, existing: bool) -> None:
+    api = FakeApi(comments=[comment(render_unavailable("old", SHA), 1)] if existing else [])
+    api.faults = [(error, "lost")]
+
+    publish_to(api, make_review())
+
+    assert api.stickies() == [BOT_STICKY]
+    assert len(api.writes()) == 2
+
+    failing = FakeApi(comments=[comment(render_unavailable("old", SHA), 1)] if existing else [])
+    failing.faults = [(error, "lost"), (error, "lost")]
+    with pytest.raises(type(error)):
+        publish_to(failing, make_review())
+    assert len(failing.writes()) == 2
+
+
+def test_late_completing_post_duplicates_once() -> None:
+    api = FakeApi()
+    api.faults = [(TimeoutError(), "late")]
+
+    publish_to(api, make_review())
+    assert api.stickies() == [BOT_STICKY, BOT_STICKY]
+
+    newer = make_review(verdict="approve", changes=[], issues=[])
+    publish_to(api, newer)
+
+    assert api.stickies() == [render_sticky(newer, SHA)] * 2
+
+
+@pytest.mark.parametrize("status", [400, 403, 404, 422])
+def test_client_errors_are_not_retried(status: int) -> None:
+    api = FakeApi()
+    api.faults = [(HTTPError("u", status, "no", None, None), "lost")]
+
+    with pytest.raises(HTTPError):
+        publish_to(api, make_review())
+
+    assert api.writes() == [("POST", COMMENTS)]
+
+
+LEAKY_HTML = {
+    "split-by-tag": f"<p>{TOKEN[:6]}<em>{TOKEN[6:]}</em></p>",
+    "entity": f"<p>{TOKEN[:3]}&#95;{TOKEN[4:]}</p>",
+    "href": f'<p><a href="{TOKEN}">link</a></p>',
+}
+
+
+@pytest.mark.parametrize("rendered", LEAKY_HTML.values(), ids=LEAKY_HTML.keys())
+@pytest.mark.parametrize("result", [make_review(), "busy"], ids=["review", "unavailable"])
+def test_rendered_html_leak_withholds_everything(
+    rendered: str, result: dict[str, Any] | str
+) -> None:
+    api = FakeApi(render=lambda text: rendered)
+
+    publish_to(api, result)
+
+    [body] = api.stickies()
+    assert render_unavailable("output withheld (rendered GitHub token pattern)", SHA) == body
+    assert api.writes() == [("POST", COMMENTS)]
+
+
+@pytest.mark.parametrize(
+    ("reason", "withheld"),
+    [
+        (TOKEN, "GitHub token pattern"),
+        ("AKIA" + "A" * 16, "AWS access key pattern"),
+    ],
+    ids=["escaped", "raw"],
+)
+def test_leaky_outcome_reason_is_withheld(reason: str, withheld: str) -> None:
+    api = FakeApi()
+
+    publish_to(api, reason)
+
+    assert api.stickies() == [render_unavailable(f"output withheld ({withheld})", SHA)]
+    assert ("POST", "/markdown") not in [(m, p) for m, p, _ in api.calls]
+
+
+def test_the_stale_sticky_goes_through_the_leak_gate() -> None:
+    api = FakeApi(
+        heads=[SHA, NEW_HEAD], render=lambda text: LEAKY_HTML["href"] if "Stale" in text else "ok"
+    )
+
+    publish_to(api, make_review())
+
+    withheld = "output withheld (rendered GitHub token pattern)"
+    assert api.stickies() == [render_unavailable(withheld, SHA)]
+
+
+@pytest.mark.parametrize("error", [HTTPError("u", 500, "boom", None, None), TimeoutError()])
+@pytest.mark.parametrize("result", [make_review(), "busy"], ids=["review", "unavailable"])
+def test_render_failure_makes_no_public_writes(
+    error: Exception, result: dict[str, Any] | str
+) -> None:
+    def fail(text: str) -> str:
+        raise error
+
+    api = FakeApi(render=fail)
+
+    with pytest.raises(type(error)):
+        publish_to(api, result)
+
+    assert api.writes() == []
+
+
+ENV = {
+    "GITHUB_TOKEN": "tok",
+    "GITHUB_REPOSITORY": REPO,
+    "PR_NUMBER": str(PR),
+    "REVIEWED_SHA": SHA,
+    "REVIEW_RESULT": "success",
+}
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        ({"OUTCOME": "ok", "FINDINGS": raw(make_review())}, render_sticky(make_review(), SHA)),
+        ({"OUTCOME": "agent timed out"}, render_unavailable("agent timed out", SHA)),
+        (
+            {"OUTCOME": "ok", "FINDINGS": "not json"},
+            render_unavailable("invalid agent output", SHA),
+        ),
+        ({"OUTCOME": "ok"}, render_unavailable("invalid agent output", SHA)),
+        ({}, render_unavailable("no review outcome", SHA)),
+        ({"REVIEW_RESULT": "failure"}, render_unavailable("review job failed", SHA)),
+        (
+            {"REVIEW_RESULT": "cancelled"},
+            render_unavailable("review job cancelled or timed out", SHA),
+        ),
+    ],
+    ids=["ok", "reason", "invalid-json", "no-findings", "no-outcome", "failure", "cancelled"],
+)
+def test_publish_from_env_maps_review_result(overrides: dict[str, str], expected: str) -> None:
+    api = FakeApi()
+
+    publish_from_env(ENV | overrides, PublishGithub("tok", request_func=api))
+
+    assert api.stickies() == [expected]
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"REVIEWED_SHA": ""},
+        {"GITHUB_TOKEN": ""},
+        {"GITHUB_REPOSITORY": ""},
+        {"PR_NUMBER": ""},
+        {"REVIEW_RESULT": ""},
+        {"REVIEW_RESULT": "unexpected"},
+        {"REVIEW_RESULT": "skipped", "REVIEWED_SHA": ""},
+    ],
+)
+def test_publish_from_env_fails_loudly_on_bad_input(overrides: dict[str, str]) -> None:
+    api = FakeApi()
+
+    with pytest.raises(SystemExit):
+        publish_from_env(ENV | overrides, PublishGithub("tok", request_func=api))
+
+    assert api.calls == []
+
+
+def test_publish_from_env_rejects_a_non_numeric_pr_number() -> None:
+    api = FakeApi()
+
+    with pytest.raises(SystemExit, match="PR_NUMBER"):
+        publish_from_env(ENV | {"PR_NUMBER": "abc"}, PublishGithub("tok", request_func=api))
+
+    assert api.calls == []
+
+
+def test_publish_from_env_is_silent_when_the_review_was_skipped() -> None:
+    api = FakeApi()
+
+    publish_from_env(ENV | {"REVIEW_RESULT": "skipped"}, PublishGithub("tok", request_func=api))
+
+    assert api.calls == []
+
+
+def test_main_returns_zero_after_publishing() -> None:
+    api = FakeApi()
+
+    status = main(ENV | {"OUTCOME": "agent timed out"}, PublishGithub("tok", request_func=api))
+
+    assert status == 0
+    assert api.stickies() == [render_unavailable("agent timed out", SHA)]
+
+
+def test_main_lets_a_missing_environment_variable_exit() -> None:
+    with pytest.raises(SystemExit):
+        main({}, PublishGithub("tok", request_func=FakeApi()))
