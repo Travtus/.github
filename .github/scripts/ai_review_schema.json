@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "changes", "issues"],
+  "properties": {
+    "verdict": {"enum": ["approve", "comment", "request_changes"]},
+    "changes": {"type": "array", "maxItems": 50, "items": {"type": "string", "maxLength": 4000}},
+    "issues": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "path", "line", "issue", "fix"],
+        "properties": {
+          "severity": {"enum": ["required", "note"]},
+          "path": {"type": "string", "minLength": 1, "maxLength": 1000},
+          "line": {"type": ["integer", "null"], "minimum": 1},
+          "issue": {"type": "string", "minLength": 1, "maxLength": 4000},
+          "fix": {"type": "string", "maxLength": 4000}
+        }
+      }
+    }
+  }
+}
