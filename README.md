@@ -19,6 +19,7 @@ for automatic comments.
   - [`run-alembic-migrations.yml`](#run-alembic-migrations)
   - [`deploy_ecs_service_to_env.yaml`](#deploy-ecs-service-to-env)
   - [`check_promptlayer_labels.yaml`](#check-promptlayer-labels)
+  - [`ai_review.yaml`](#ai-review)
 
 ## Project configuration file
 
@@ -317,3 +318,50 @@ jobs:
     needs: prompt-labels
     # ...
 ```
+
+<a id="ai-review"></a>
+### `ai_review.yaml` — AI pull request review
+
+Runs a Claude review of a pull request and posts a sticky summary comment with inline comments. The `review` job reads the PR with no write access and holds the Claude token. The `publish` job holds `pull-requests: write` and sees neither the token nor the PR code. The agent is limited to reading the PR checkout, the pinned `travtus-apm` checkout and the prepared review inputs.
+
+**Triggers:** `workflow_call`, from a caller on `pull_request_target` (`opened`, `synchronize`, `reopened`, `ready_for_review`)
+
+| Input | Default | Description |
+| --- | --- | --- |
+| `AGENT` | `claude` | Review agent. Any other value fails the review job |
+| `RUNS_ON` | `travtus-ci` | Runner label for the `review` job. A rerun uses `ubuntu-latest` |
+| `APM_REF` | a pinned `travtus-apm` commit | Commit that supplies the review rules and knowledge |
+
+**Secret:** `PLATFORM_ADMIN_APP_PRIVATE_KEY`, plus the repository variable `PLATFORM_ADMIN_APP_ID`. The Claude token is not passed by the caller: it is the `CLAUDE_CODE_OAUTH_TOKEN` secret of the `ai-review` environment.
+
+Before the first run in a repository:
+
+1. Create the `ai-review` environment. Restrict it to the default branch, add no required reviewers, and store `CLAUDE_CODE_OAUTH_TOKEN` there.
+2. Protect the default branch with a ruleset that has no bypass, so a PR cannot change the reviewed workflow.
+3. Install the Platform Admin App on `travtus-apm`.
+4. Add the repository to runner group 3, or pass `RUNS_ON: ubuntu-latest`. See the `travtus-ci` fleet in `platform-shared-infra`. Runners need git 2.40 or newer.
+
+Pin the caller to a commit, as `@<sha>`: the scripts are checked out at the workflow's own commit.
+
+```yaml
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ai-review:
+    uses: Travtus/.github/.github/workflows/ai_review.yaml@<sha>
+    secrets:
+      PLATFORM_ADMIN_APP_PRIVATE_KEY: ${{ secrets.PLATFORM_ADMIN_APP_PRIVATE_KEY }}
+```
+
+Nothing is reviewed or posted for drafts, forks, bot authors, PRs whose base is not the default branch (the `ai-review` environment only admits the default branch, so stacked PRs are skipped), PRs with no reviewable changes, or PRs over 1,000 changed lines (same exclusions as `pr_size_check.yml`).
+
+**Known limits**
+
+- Put no `concurrency:` with `cancel-in-progress` at workflow level or on the caller's `uses:` job. Cancelling the whole run skips `publish`, so no sticky is posted. The workflow has its own job-level groups.
+- A PR that was reviewed and later becomes a skip (for example it grows past the line limit) keeps its old sticky comment.
