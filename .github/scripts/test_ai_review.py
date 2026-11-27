@@ -162,6 +162,34 @@ def test_leak_scan_sees_secrets_that_rendering_would_rejoin(
     assert find_leak(review, secrets) is not None
 
 
+IGNORABLE_MARKS = [
+    0x17B4,
+    0x17B5,
+    0x180B,
+    0x180D,
+    0x180F,
+    0xFE00,
+    0xFE0F,
+    0xFFF0,
+    0xFFF8,
+    0xE0000,
+    0xE0101,
+    0xE01EF,
+    0xE0FFF,
+]
+AWS_KEY = "AKIA" + "IOSFODNN7EXAMPLE"
+
+
+@pytest.mark.parametrize("mark", IGNORABLE_MARKS, ids=hex)
+def test_default_ignorable_marks_cannot_hide_a_credential(mark: int) -> None:
+    split = split_by(AWS_KEY, chr(mark))
+    review = make_review(changes=[split], issues=[make_issue(fix=split)])
+
+    assert find_leak(review, []) == "AWS access key pattern"
+    withheld = render_unavailable("output withheld (AWS access key pattern)", SHA)
+    assert publishable_body(review, SHA, SHA, []) == withheld
+
+
 @pytest.mark.parametrize("invisible", INVISIBLES)
 @pytest.mark.parametrize("field", ["path", "issue", "fix", "changes"])
 def test_a_review_that_passes_the_scan_never_renders_the_secret(field: str, invisible: str) -> None:
@@ -831,6 +859,7 @@ def publish_to(api: FakeApi, result: dict[str, Any] | str) -> None:
 
 OLD_STICKY = render_sticky(make_review(verdict="approve"), SHA)
 NEWER_STICKY = render_sticky(make_review(verdict="approve"), NEW_HEAD)
+OLDER_STICKY = render_sticky(make_review(verdict="approve"), "b" * 40)
 NEWER_STALE = render_stale(make_review(verdict="approve"), NEW_HEAD, "c" * 40)
 PATCH_FIRST = [("PATCH", f"/repos/{REPO}/issues/comments/1")]
 
@@ -840,11 +869,19 @@ PATCH_FIRST = [("PATCH", f"/repos/{REPO}/issues/comments/1")]
     [
         ([], [("POST", COMMENTS)]),
         ([comment(OLD_STICKY, 1)], PATCH_FIRST),
+        ([comment(OLDER_STICKY, 1)], PATCH_FIRST),
         ([comment(NEWER_STICKY, 1)], []),
         ([comment(NEWER_STALE, 1)], []),
         ([comment(OLD_STICKY, 1), comment(NEWER_STICKY, 2)], []),
     ],
-    ids=["no-sticky", "sticky-for-this-commit", "newer-sticky", "newer-stale-sticky", "mixed"],
+    ids=[
+        "no-sticky",
+        "sticky-for-this-commit",
+        "sticky-for-an-older-commit",
+        "sticky-for-the-head",
+        "stale-sticky-for-the-head",
+        "mixed",
+    ],
 )
 def test_publish_on_a_moved_head_never_overwrites_a_newer_review(
     comments: list[dict[str, Any]], expected: list[tuple[str, str]]

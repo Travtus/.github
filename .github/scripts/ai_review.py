@@ -37,7 +37,18 @@ CREDENTIAL_PATTERNS = {
     "refresh token": re.compile(r'"refresh_token"\s*:\s*"[^"]+"'),
 }
 
-INVISIBLE_FILLERS = frozenset("\u034f\u115f\u1160\u3164\uffa0\u2065")
+IGNORABLE_RANGES = (
+    (0x034F, 0x034F),
+    (0x115F, 0x1160),
+    (0x17B4, 0x17B5),
+    (0x180B, 0x180F),
+    (0x2065, 0x2065),
+    (0x3164, 0x3164),
+    (0xFE00, 0xFE0F),
+    (0xFFA0, 0xFFA0),
+    (0xFFF0, 0xFFF8),
+    (0xE0000, 0xE0FFF),
+)
 ZERO_WIDTH_BREAKS = re.compile(
     r"(?i)(?<=:)(?=//)|(?<=www)(?=\.)|(?<=gh)(?=-\d)|(?<=#)(?=\d)|(?<=@)|(?=\$)"
 )
@@ -165,7 +176,7 @@ def _is_invisible(character: str) -> bool:
     category = unicodedata.category(character)
     return (
         category == "Cf"
-        or character in INVISIBLE_FILLERS
+        or any(low <= ord(character) <= high for low, high in IGNORABLE_RANGES)
         or (category == "Cc" and character not in "\n\t")
     )
 
@@ -435,9 +446,9 @@ def publish(
             upsert_sticky(github, repo, number, body)
         return
     if head != reviewed_sha:
-        reviewed_line = _reviewed_line(reviewed_sha)
+        head_line = _reviewed_line(head)
         stickies = _own_stickies(github, repo, number)
-        if all(reviewed_line in sticky["body"].splitlines() for sticky in stickies):
+        if not any(head_line in sticky["body"].splitlines() for sticky in stickies):
             _upsert_review(github, repo, number, result, reviewed_sha, head)
         return
     body = _upsert_review(github, repo, number, result, reviewed_sha, head)
