@@ -1,0 +1,191 @@
+name: AI review
+
+on:
+  workflow_call:
+    inputs:
+      AGENT:
+        description: Review agent. Only claude is supported.
+        type: string
+        default: claude
+      RUNS_ON:
+        description: Runner label for the review job. A rerun falls back to ubuntu-latest.
+        type: string
+        default: travtus-ci
+      APM_REF:
+        description: Commit of Travtus/travtus-apm that supplies the review rules and knowledge.
+        type: string
+        default: cb9b6edfa1d0b3f21a31bff8fcc9fbc6ddd27f63
+    secrets:
+      PLATFORM_ADMIN_APP_PRIVATE_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    name: Review the pull request
+    if: ${{ !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != 'Bot' && github.event.pull_request.base.ref == github.event.repository.default_branch }}
+    runs-on: ${{ github.run_attempt == '1' && inputs.RUNS_ON || 'ubuntu-latest' }}
+    environment: ai-review
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    concurrency:
+      group: ai-review-analysis-${{ github.repository }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    env:
+      UV_FROZEN: "1"
+      UV_NO_DEV: "1"
+    outputs:
+      outcome: ${{ steps.agent.outputs.outcome || steps.prepare.outputs.outcome }}
+      findings: ${{ steps.agent.outputs.findings }}
+      reviewed_sha: ${{ steps.prepare.outputs.reviewed_sha }}
+    steps:
+      - name: Record the job start time
+        run: echo "JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Reject unsupported agents
+        env:
+          AGENT: ${{ inputs.AGENT }}
+        run: |
+          if [ "$AGENT" != "claude" ]; then
+            echo "::error::AGENT must be claude"
+            exit 1
+          fi
+
+      - name: Keep caches and the virtualenv under the runner temp dir
+        run: |
+          {
+            echo "UV_CACHE_DIR=$RUNNER_TEMP/uv-cache"
+            echo "UV_PROJECT_ENVIRONMENT=$RUNNER_TEMP/knowledge-venv"
+            echo "NPM_CONFIG_CACHE=$RUNNER_TEMP/npm-cache"
+            echo "NPM_CONFIG_PREFIX=$RUNNER_TEMP/npm-global"
+          } >> "$GITHUB_ENV"
+
+      - name: Check out the PR
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          persist-credentials: false
+          lfs: false
+          submodules: false
+
+      - name: Check out scripts
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: github-automation
+          persist-credentials: false
+          lfs: false
+          submodules: false
+
+      - name: Fetch the base branch
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
+          echo "::add-mask::$auth"
+          authed_fetch() {
+            GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+              GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" git -C pr fetch --no-tags "$@"
+          }
+          authed_fetch --depth=1 origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+          if ! git -C pr merge-base "origin/$BASE_REF" "$HEAD_SHA" > /dev/null 2>&1; then
+            authed_fetch --unshallow origin
+          fi
+
+      - name: Prepare the review inputs
+        id: prepare
+        run: python github-automation/.github/scripts/ai_review_agent.py prepare
+
+      - name: Mint a read token for travtus-apm
+        id: apm-token
+        if: steps.prepare.outputs.outcome == 'review'
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.PLATFORM_ADMIN_APP_ID }}
+          private-key: ${{ secrets.PLATFORM_ADMIN_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: travtus-apm
+          permission-contents: read
+
+      - name: Check out APM
+        if: steps.prepare.outputs.outcome == 'review'
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository_owner }}/travtus-apm
+          ref: ${{ inputs.APM_REF }}
+          token: ${{ steps.apm-token.outputs.token }}
+          path: travtus-apm
+          persist-credentials: false
+          lfs: false
+          submodules: false
+
+      - name: Set up uv
+        if: steps.prepare.outputs.outcome == 'review'
+        uses: astral-sh/setup-uv@v10.4.0
+        with:
+          enable-cache: false
+
+      - name: Set up Node
+        if: steps.prepare.outputs.outcome == 'review'
+        uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          package-manager-cache: false
+
+      - name: Install the Claude Code CLI
+        if: steps.prepare.outputs.outcome == 'review'
+        run: |
+          npm install --global @anthropic-ai/claude-code@2.1.332
+          echo "$NPM_CONFIG_PREFIX/bin" >> "$GITHUB_PATH"
+
+      - name: Look up knowledge
+        if: steps.prepare.outputs.outcome == 'review'
+        run: python github-automation/.github/scripts/ai_review_agent.py lookup
+
+      - name: Run the review agent
+        id: agent
+        if: steps.prepare.outputs.outcome == 'review'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: python github-automation/.github/scripts/ai_review_agent.py run-agent
+
+  publish:
+    name: Publish the review
+    needs: review
+    if: ${{ !cancelled() && needs.review.result != 'skipped' && needs.review.outputs.outcome != 'skip' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: ai-review-publish-${{ github.repository }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    steps:
+      - name: Check out scripts
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: github-automation
+          persist-credentials: false
+          lfs: false
+          submodules: false
+
+      - name: Post the review
+        env:
+          REVIEW_RESULT: ${{ needs.review.result }}
+          OUTCOME: ${{ needs.review.outputs.outcome }}
+          FINDINGS: ${{ needs.review.outputs.findings }}
+          REVIEWED_SHA: ${{ needs.review.outputs.reviewed_sha || github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python github-automation/.github/scripts/ai_review.py

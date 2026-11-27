@@ -25,6 +25,8 @@ from ai_review_agent import (
     changed_lines,
     classify,
     claude_argv,
+    lookup,
+    lookup_queries,
     main,
     prepare,
     run_agent,
@@ -860,3 +862,169 @@ def test_sigterm_to_run_agent_kills_the_agent_group(tmp_path: Path) -> None:
         child.kill()
 
     assert wait_until_gone(int(marker.read_text()))
+
+
+TOOL_PATH = Path("travtus-apm/packages/travtus-agent-pack/tools/knowledge-lookup")
+HOSTILE = ["$(touch pwned).sh", "--read.md", "a b;c.py", f"{CANARY}.ts"]
+
+
+@pytest.mark.parametrize(
+    ("changed", "extra"),
+    [
+        ("", []),
+        ("a.py\nsub/B.PY\n", [("python review", "rule")]),
+        ("a.ts\nweb/b.tsx\nc.py\n", [("python review", "rule"), ("typescript review", "rule")]),
+        ("README.md\n--read.md\n$(id).sh\n", []),
+    ],
+    ids=["none", "python", "python-and-typescript", "unmapped-suffixes"],
+)
+def test_lookup_queries_use_a_fixed_vocabulary(changed: str, extra: list[tuple[str, str]]) -> None:
+    assert lookup_queries("repo-x", changed) == [
+        ("repo-x", "auto"),
+        ("repo-x review", "rule"),
+        *extra,
+    ]
+
+
+def make_lookup(tmp_path: Path, tool: str | None, changed: str = "a.py\n") -> dict[str, str]:
+    workspace = tmp_path / "work"
+    runner = tmp_path / "runner"
+    (runner / "ai-review").mkdir(parents=True)
+    (runner / "ai-review" / "changed-files.txt").write_text(changed)
+    (runner / "ai-review" / "pr.json").write_text(json.dumps({"title": "$(touch pwned)"}))
+    if tool is not None:
+        path = workspace / TOOL_PATH
+        path.parent.mkdir(parents=True)
+        path.write_text(f"#!{sys.executable}\n{tool}")
+        path.chmod(0o755)
+    return {
+        "GITHUB_WORKSPACE": str(workspace),
+        "RUNNER_TEMP": str(runner),
+        "GITHUB_REPOSITORY": "Travtus/repo-x",
+        "GITHUB_OUTPUT": str(tmp_path / "output"),
+        "LOOKUP_LOG": str(runner / "log"),
+        "PATH": GIT_ENV["PATH"],
+    }
+
+
+RECORDING_TOOL = textwrap.dedent("""
+    import json, os, sys
+    with open(os.environ["RUNNER_TEMP"] + "/log", "a") as log:
+        log.write(json.dumps(sys.argv[1:]) + "\\n")
+    print('{"query": "' + sys.argv[1] + '"}')
+    """)
+
+
+def test_lookup_runs_the_tool_with_fixed_argv_and_saves_results(tmp_path: Path) -> None:
+    env = make_lookup(tmp_path, RECORDING_TOOL, "\n".join(HOSTILE) + "\nx.py\n")
+    root = str(Path(env["GITHUB_WORKSPACE"]) / "travtus-apm" / ".knowledge")
+
+    assert main(["lookup"], env) == 0
+
+    calls = [json.loads(line) for line in Path(env["LOOKUP_LOG"]).read_text().splitlines()]
+    kinds = ["auto", "rule", "rule", "rule"]
+    queries = ["repo-x", "repo-x review", "python review", "typescript review"]
+    assert calls == [
+        [f"--query={query}", "--kind", kind, "--root", root, "--json"]
+        for query, kind in zip(queries, kinds, strict=True)
+    ]
+    saved = sorted((review_dir(env) / "knowledge").iterdir())
+    assert [path.name for path in saved] == ["0.json", "1.json", "2.json", "3.json"]
+    assert json.loads(saved[2].read_text()) == {"query": "--query=python review"}
+    assert not Path(env["GITHUB_OUTPUT"]).read_text()
+
+
+@pytest.mark.parametrize(
+    ("tool", "saved"),
+    [
+        ("import sys; sys.exit(1)", []),
+        ("import sys; sys.exit(0 if '--query=repo-x' in sys.argv else 3)", ["0.json"]),
+        ("import time; time.sleep(30)", []),
+        (None, []),
+    ],
+    ids=["all-fail", "one-fails", "timeout", "missing-tool"],
+)
+def test_lookup_is_best_effort(tmp_path: Path, tool: str | None, saved: list[str]) -> None:
+    env = make_lookup(tmp_path, tool, "a.py\n")
+
+    assert lookup(env, budget=0.5) == {}
+
+    knowledge = review_dir(env) / "knowledge"
+    assert sorted(path.name for path in knowledge.glob("*.json")) == saved
+
+
+SLOW_TOOL = RECORDING_TOOL + textwrap.dedent("""
+    import pathlib, time
+    time.sleep(3)
+    pathlib.Path(os.environ["RUNNER_TEMP"] + "/log.done").write_text("x")
+    """)
+
+
+def ticking(*values: float) -> Callable[[], float]:
+    ticks = iter(values)
+    return lambda: next(ticks, values[-1])
+
+
+@pytest.mark.parametrize(
+    ("tool", "budget", "clock", "saved"),
+    [
+        (RECORDING_TOOL, 100, ticking(0, 0, 100), ["0.json"]),
+        (SLOW_TOOL, 100, ticking(0, 99.5, 200), []),
+    ],
+    ids=["later-queries-skipped-once-spent", "running-query-cut-at-remaining-budget"],
+)
+def test_lookup_shares_one_deadline_across_queries(
+    tmp_path: Path, tool: str, budget: float, clock: Callable[[], float], saved: list[str]
+) -> None:
+    env = make_lookup(tmp_path, tool, "a.py\n")
+
+    launched: list[object] = []
+
+    def popen(*args: Any, **kwargs: Any) -> subprocess.Popen[bytes]:  # noqa: ANN401
+        launched.append(args)
+        return subprocess.Popen(*args, **kwargs)  # noqa: S603
+
+    lookup(env, popen=popen, now=clock, budget=budget)
+
+    assert len(launched) == 1
+    assert not Path(env["LOOKUP_LOG"] + ".done").exists()
+    knowledge = review_dir(env) / "knowledge"
+    assert sorted(path.name for path in knowledge.glob("*.json")) == saved
+
+
+STEP_SECRETS = ["GITHUB_TOKEN", "ACTIONS_RUNTIME_TOKEN", "AWS_SECRET_ACCESS_KEY", "STEP_SECRET"]
+TOOL_ENV_KEYS = ["PATH", "HOME", "LANG", "TMPDIR", "RUNNER_TEMP", "UV_CACHE_DIR", "UV_FROZEN"]
+
+
+def test_lookup_tool_gets_an_allowlisted_env(tmp_path: Path) -> None:
+    tool = "import json, os; print(json.dumps(sorted(os.environ)))"
+    env = make_lookup(tmp_path, tool)
+    env |= dict.fromkeys(STEP_SECRETS, CANARY)
+    env |= {"UV_CACHE_DIR": "/c", "UV_FROZEN": "1", "HOME": "/h", "LANG": "C", "TMPDIR": "/t"}
+
+    lookup(env)
+
+    seen = json.loads((review_dir(env) / "knowledge" / "0.json").read_text())
+    assert not set(seen) & {*STEP_SECRETS, "GITHUB_REPOSITORY", "LOOKUP_LOG", "GITHUB_OUTPUT"}
+    assert set(TOOL_ENV_KEYS) <= set(seen)
+
+
+def test_lookup_does_not_echo_subprocess_output(
+    tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    tool = f"import sys; print('{CANARY}'); print('{CANARY}', file=sys.stderr); sys.exit(1)"
+    env = make_lookup(tmp_path, tool)
+
+    lookup(env)
+
+    seen = capfd.readouterr()
+    assert CANARY not in seen.out + seen.err
+
+
+def test_lookup_tolerates_non_utf8_changed_file_names(tmp_path: Path) -> None:
+    env = make_lookup(tmp_path, RECORDING_TOOL)
+    (review_dir(env) / "changed-files.txt").write_bytes(b"caf\xe9.py\nx.py\n")
+
+    assert lookup(env) == {}
+
+    assert sorted(path.name for path in (review_dir(env) / "knowledge").glob("*.json"))

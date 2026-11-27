@@ -27,6 +27,12 @@ MAX_FINDINGS_BYTES = 120_000
 DISALLOWED_TOOLS = "Bash,Write,Edit,NotebookEdit,WebFetch,WebSearch,Task,Skill"
 SETTINGS = Path(__file__).with_name("ai_review_claude_settings.json")
 PROMPT = Path(__file__).with_name("ai_review_prompt.md")
+LOOKUP_TOOL = Path("travtus-apm/packages/travtus-agent-pack/tools/knowledge-lookup")
+LOOKUP_BUDGET_SECONDS = 180
+LANGUAGE_BY_SUFFIX = {".py": "python", ".ts": "typescript", ".tsx": "typescript"}
+LOOKUP_ENV_KEYS = (
+    "PATH HOME LANG TMPDIR RUNNER_TEMP UV_CACHE_DIR UV_PROJECT_ENVIRONMENT UV_FROZEN UV_NO_DEV"
+).split()
 USAGE_LIMIT = re.compile(r"usage limit", re.IGNORECASE)
 
 CASE_FOLDED = ("*.md", "test/**", "tests/**", "unit_test/**", "unit_tests/**", "alembic*/**")
@@ -137,6 +143,52 @@ def prepare(env: Mapping[str, str]) -> dict[str, str]:
     (review_dir / "pr.json").write_text(json.dumps(details))
     remove_symlinks(pr)
     return {"outcome": "review", "reviewed_sha": head}
+
+
+def lookup_queries(repo: str, changed_files: str) -> list[tuple[str, str]]:
+    suffixes = {Path(name).suffix.lower() for name in changed_files.splitlines()}
+    languages = sorted({LANGUAGE_BY_SUFFIX[s] for s in suffixes if s in LANGUAGE_BY_SUFFIX})
+    queries = [(repo, "auto"), (f"{repo} review", "rule")]
+    return queries + [(f"{language} review", "rule") for language in languages]
+
+
+def lookup(
+    env: Mapping[str, str],
+    popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
+    now: Callable[[], float] = time.monotonic,
+    budget: float = LOOKUP_BUDGET_SECONDS,
+) -> dict[str, str]:
+    workspace = Path(env["GITHUB_WORKSPACE"])
+    temp = Path(env["RUNNER_TEMP"])
+    repo = env["GITHUB_REPOSITORY"].rsplit("/", 1)[-1]
+    queries = lookup_queries(
+        repo, (temp / "ai-review" / "changed-files.txt").read_text(errors="replace")
+    )
+    knowledge, agent_io = temp / "ai-review" / "knowledge", temp / "agent-io"
+    knowledge.mkdir(parents=True, exist_ok=True)
+    agent_io.mkdir(exist_ok=True)
+    root = workspace / "travtus-apm" / ".knowledge"
+    tool_env = {key: env[key] for key in LOOKUP_ENV_KEYS if key in env}
+    deadline = now() + budget
+    saved = 0
+    for number, (query, kind) in enumerate(queries):
+        remaining = deadline - now()
+        if remaining <= 0:
+            break
+        argv = [str(workspace / LOOKUP_TOOL), f"--query={query}", "--kind", kind]
+        argv += ["--root", str(root), "--json"]
+        result = knowledge / f"{number}.json"
+        try:
+            stderr = agent_io / f"lookup-{number}.stderr"
+            code = run_process(argv, workspace, tool_env, result, stderr, remaining, popen)
+        except OSError:
+            code = None
+        if code == 0:
+            saved += 1
+        else:
+            result.unlink(missing_ok=True)
+    print(f"knowledge lookups saved: {saved} of {len(queries)}")
+    return {}
 
 
 def write_outputs(env: Mapping[str, str], outputs: Mapping[str, str]) -> None:
@@ -297,6 +349,7 @@ def run_agent(
 
 COMMANDS: dict[str, Callable[[Mapping[str, str]], dict[str, str]]] = {
     "prepare": prepare,
+    "lookup": lookup,
     "run-agent": run_agent,
 }
 
