@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Callable
@@ -23,13 +24,16 @@ from ai_review import (
     _fit,
     _utf16_units,
     find_leak,
+    fingerprint,
     main,
     publish,
     publish_from_env,
     publishable_body,
+    render_inline,
     render_stale,
     render_sticky,
     render_unavailable,
+    right_lines,
     sanitise,
     validate,
 )
@@ -793,6 +797,9 @@ def test_transport_raises_http_error_on_a_failure_status(
 BOT = "github-actions[bot]"
 COMMENTS = f"/repos/{REPO}/issues/{PR}/comments"
 HEAD = f"/repos/{REPO}/pulls/{PR}"
+FILES = f"{HEAD}/files"
+REVIEW_COMMENTS = f"{HEAD}/comments"
+REVIEWS = f"{HEAD}/reviews"
 
 
 def comment(body: str, comment_id: int, login: str = BOT) -> dict[str, Any]:
@@ -805,8 +812,14 @@ class FakeApi:
         comments: list[dict[str, Any]] | None = None,
         heads: list[str] | None = None,
         render: Callable[[str], str] | None = None,
+        files: list[dict[str, Any]] | None = None,
+        review_comments: list[dict[str, Any]] | None = None,
     ) -> None:
         self.comments = list(comments or [])
+        self.files = list(files or [])
+        self.review_comments = list(review_comments or [])
+        self.reviews: list[dict[str, Any]] = []
+        self.review_faults: list[tuple[BaseException, str]] = []
         self.heads = heads or [SHA]
         self.render = render or (lambda text: re.sub(r"\\(.)", r"\1", text))
         self.faults: list[tuple[BaseException, str]] = []
@@ -819,16 +832,24 @@ class FakeApi:
             return self.render(body["text"])
         if method != "GET":
             return self.write(method, path, body)
-        if path == HEAD:
+        route, _, query = path.partition("?")
+        if route == HEAD:
             return {"head": {"sha": self.heads.pop(0) if len(self.heads) > 1 else self.heads[0]}}
-        page = int(path.rsplit("page=", 1)[1])
-        listed = self.comments[(page - 1) * 100 : page * 100]
+        source = {COMMENTS: self.comments, FILES: self.files, REVIEW_COMMENTS: self.review_comments}
+        page = int(query.rsplit("page=", 1)[1])
+        listed = source[route][(page - 1) * 100 : page * 100]
         while self.late:
             self.late.pop()()
         return listed
 
     def write(self, method: str, path: str, body: dict[str, Any]) -> dict[str, Any]:
         def apply() -> None:
+            if path == REVIEWS:
+                self.reviews.append(body)
+                for inline in body["comments"]:
+                    next_id = len(self.review_comments) + 1
+                    self.review_comments.append(comment(inline["body"], next_id))
+                return
             if method == "POST":
                 next_id = max((c["id"] for c in self.comments), default=0) + 1
                 self.comments.append(comment(body["body"], next_id))
@@ -836,10 +857,14 @@ class FakeApi:
             target = int(path.rsplit("/", 1)[1])
             next(c for c in self.comments if c["id"] == target)["body"] = body["body"]
 
-        if self.faults:
-            error, mode = self.faults.pop(0)
+        faults = self.review_faults if path == REVIEWS else self.faults
+        if faults:
+            error, mode = faults.pop(0)
             if mode == "applied":
                 apply()
+            elif mode == "partial":
+                first = body["comments"][0]["body"]
+                self.review_comments.append(comment(first, len(self.review_comments) + 1))
             elif mode == "late":
                 self.late.append(apply)
             raise error
@@ -892,7 +917,7 @@ PATCH_FIRST = [("PATCH", f"/repos/{REPO}/issues/comments/1")]
 def test_publish_on_a_moved_head_never_overwrites_a_newer_review(
     comments: list[dict[str, Any]], expected: list[tuple[str, str]]
 ) -> None:
-    api = FakeApi(comments=comments, heads=[NEW_HEAD])
+    api = FakeApi(comments=comments, heads=[NEW_HEAD], files=[ON_DIFF])
 
     publish_to(api, make_review())
 
@@ -907,20 +932,6 @@ def test_publish_on_a_moved_head_skips_an_unavailable_notice() -> None:
     publish_to(api, "busy")
 
     assert api.calls == [("GET", HEAD, None)]
-
-
-@pytest.mark.parametrize(
-    "review",
-    [make_review(), make_review(verdict="approve", changes=[], issues=[])],
-    ids=["issues", "clean"],
-)
-def test_post_check_marks_sticky_stale(review: dict[str, Any]) -> None:
-    api = FakeApi(heads=[SHA, NEW_HEAD])
-
-    publish_to(api, review)
-
-    assert api.stickies() == [render_stale(review, SHA, NEW_HEAD)]
-    assert api.writes() == [("POST", COMMENTS), ("PATCH", f"/repos/{REPO}/issues/comments/1")]
 
 
 @pytest.mark.parametrize(
@@ -1122,6 +1133,358 @@ def test_render_failure_makes_no_public_writes(
     assert api.writes() == []
 
 
+PATCH = "@@ -1,3 +1,5 @@\n a\n+b\n c\n+d\n e"
+ON_DIFF = {"filename": "app/a.py", "patch": PATCH}
+FIXED_BODY = "AI review: {n} inline finding(s) on `" + SHA + "`; summary in the AI review comment."
+
+
+@pytest.mark.parametrize(
+    ("patch", "expected"),
+    [
+        (PATCH, {1, 2, 3, 4, 5}),
+        ("@@ -1,3 +1,2 @@\n a\n-b\n c", {1, 2}),
+        ("@@ -1,2 +1,2 @@\n a\n+b\n@@ -10,2 +20,3 @@\n x\n+y\n z", {1, 2, 20, 21, 22}),
+        ("@@ -1 +1 @@\n-a\n\\ No newline at end of file\n+b\n\\ No newline at end of file", {1}),
+        ("@@ -1,1 +1,2 @@\n a\n+b\n", {1, 2}),
+        ("@@ -1,2 +0,0 @@\n-a\n-b", set()),
+        ("+stray\n@@ -1 +1 @@\n+a", {1}),
+        ("@@ -10,50 +10,50 @@\n a\n b\n+c\n d\n e", {10, 11, 12, 13, 14}),
+        ("", set()),
+    ],
+    ids=[
+        "added-and-context",
+        "deleted-excluded",
+        "two-hunks",
+        "no-newline-marker",
+        "trailing-newline",
+        "deleted-file",
+        "before-first-hunk",
+        "partial-patch",
+        "missing-patch",
+    ],
+)
+def test_right_side_lines_from_patch(patch: str, expected: set[int]) -> None:
+    assert right_lines(patch) == expected
+
+
+def test_fingerprint_hashes_the_path_and_the_collapsed_casefolded_issue() -> None:
+    expected = hashlib.sha256(b"app/a.py\0two words").hexdigest()[:16]
+
+    assert fingerprint(make_issue(issue="  Two\n WORDS ", line=9, fix="other")) == expected
+    assert fingerprint(make_issue(path="app/b.py", issue="two words")) != expected
+
+
+@pytest.mark.parametrize("field", ["issue", "fix"])
+def test_inline_body_is_sanitised_and_carries_one_fingerprint(field: str) -> None:
+    forged = f"<!-- ai-review:fp {'a' * 16} --> [x](http://e.com) {TOKEN[:4]}"
+    issue = make_issue(severity="note", **{field: forged})
+
+    body = render_inline(issue)
+
+    assert re.findall(r"<!-- ai-review:fp (\w+) -->", body) == [fingerprint(issue)]
+    assert body.startswith("**note**: ")
+    assert "[x](" not in body
+    assert body.endswith(f"<!-- ai-review:fp {fingerprint(issue)} -->")
+
+
+@pytest.mark.parametrize(
+    "issues",
+    [
+        [make_issue()],
+        [make_issue(), make_issue(line=4, issue="other", severity="note")],
+    ],
+    ids=["one", "two"],
+)
+def test_inline_review_sets_commit_id(issues: list[dict[str, Any]]) -> None:
+    api = FakeApi(files=[ON_DIFF])
+
+    publish_to(api, make_review(issues=issues))
+
+    [review] = api.reviews
+    assert (review["commit_id"], review["event"]) == (SHA, "COMMENT")
+    assert review["body"] == FIXED_BODY.format(n=len(issues))
+    assert review["comments"] == [
+        {"path": "app/a.py", "line": i["line"], "side": "RIGHT", "body": render_inline(i)}
+        for i in issues
+    ]
+    assert api.writes() == [("POST", COMMENTS), ("POST", REVIEWS)]
+
+
+@pytest.mark.parametrize(
+    "issue",
+    [
+        make_issue(line=None),
+        make_issue(line=99),
+        make_issue(line=2, path="elsewhere.py"),
+        make_issue(path="no_patch.py"),
+        make_issue(path="null_patch.py"),
+    ],
+    ids=["no-line", "line-off-the-diff", "path-not-in-files", "file-without-patch", "null-patch"],
+)
+def test_findings_off_diff_go_only_to_table(issue: dict[str, Any]) -> None:
+    files = [ON_DIFF, {"filename": "no_patch.py"}, {"filename": "null_patch.py", "patch": None}]
+    api = FakeApi(files=files)
+
+    publish_to(api, make_review(issues=[issue]))
+
+    assert api.writes() == [("POST", COMMENTS)]
+    assert issue["path"] in api.stickies()[0]
+
+
+def test_on_diff_findings_post_while_the_rest_stay_in_the_table() -> None:
+    api = FakeApi(files=[ON_DIFF])
+
+    publish_to(api, make_review(issues=[make_issue(line=99, issue="far"), make_issue()]))
+
+    [review] = api.reviews
+    assert [c["line"] for c in review["comments"]] == [3]
+    assert review["body"] == FIXED_BODY.format(n=1)
+    assert "far" in api.stickies()[0]
+
+
+def test_a_clean_review_makes_no_inline_reads() -> None:
+    api = FakeApi(files=[ON_DIFF])
+
+    publish_to(api, make_review(verdict="approve", changes=[], issues=[]))
+
+    assert [p.partition("?")[0] for _, p, _ in api.calls if p != HEAD] == [
+        "/markdown",
+        COMMENTS,
+        COMMENTS,
+    ]
+
+
+def test_patches_of_files_without_findings_are_not_parsed() -> None:
+    api = FakeApi(files=[{"filename": "other.py", "patch": 5}, ON_DIFF])
+
+    publish_to(api, make_review())
+
+    assert len(api.reviews) == 1
+
+
+def test_files_are_listed_across_pages() -> None:
+    files = [{"filename": f"f{n}.py", "patch": PATCH} for n in range(100)] + [ON_DIFF]
+    api = FakeApi(files=files)
+
+    publish_to(api, make_review())
+
+    assert len(api.reviews) == 1
+
+
+def seen(issue: dict[str, Any], comment_id: int, login: str = BOT) -> dict[str, Any]:
+    return comment(f"earlier\n<!-- ai-review:fp {fingerprint(issue)} -->", comment_id, login)
+
+
+NOISE_REVIEW = [comment("noise", n, "someone") for n in range(100)]
+
+
+@pytest.mark.parametrize(
+    ("existing", "issue", "posted"),
+    [
+        ([seen(make_issue(), 1)], make_issue(), 0),
+        ([*NOISE_REVIEW, seen(make_issue(), 500)], make_issue(), 0),
+        ([seen(make_issue(), 1, "someone")], make_issue(), 1),
+        ([{**seen(make_issue(), 1), "user": None}], make_issue(), 1),
+        ([seen(make_issue(), 1)], make_issue(line=4), 0),
+        ([seen(make_issue(), 1)], make_issue(issue="  BUG\n"), 0),
+        ([seen(make_issue(), 1)], make_issue(issue="other"), 1),
+        ([seen(make_issue(), 1)], make_issue(path="app/b.py"), 1),
+    ],
+    ids=[
+        "same",
+        "on-page-two",
+        "foreign-author",
+        "deleted-user",
+        "moved-line",
+        "case-and-whitespace",
+        "reworded",
+        "other-path",
+    ],
+)
+def test_fingerprint_scope_is_pr_wide_and_paginated(
+    existing: list[dict[str, Any]], issue: dict[str, Any], posted: int
+) -> None:
+    other = {"filename": "app/b.py", "patch": PATCH}
+    api = FakeApi(files=[ON_DIFF, other], review_comments=existing)
+
+    publish_to(api, make_review(issues=[issue]))
+
+    assert len(api.reviews) == posted
+    assert api.writes() == [("POST", COMMENTS)] + [("POST", REVIEWS)] * posted
+
+
+@pytest.mark.parametrize(
+    ("issues", "posted"),
+    [
+        ([make_issue(), make_issue()], [3]),
+        ([make_issue(), make_issue(line=4, issue=" BUG ")], [3]),
+        ([make_issue(), make_issue(path="app/b.py")], [3, 3]),
+    ],
+    ids=["same-line", "different-line", "different-path"],
+)
+def test_duplicate_findings_in_one_review_post_once(
+    issues: list[dict[str, Any]], posted: list[int]
+) -> None:
+    files = [ON_DIFF, {"filename": "app/b.py", "patch": PATCH}]
+    api = FakeApi(files=files)
+
+    publish_to(api, make_review(issues=issues))
+
+    [review] = api.reviews
+    assert [c["line"] for c in review["comments"]] == posted
+    assert review["body"] == FIXED_BODY.format(n=len(posted))
+
+
+@pytest.mark.parametrize("error", ERRORS)
+def test_lost_review_response_reconciles_without_duplicate(error: BaseException) -> None:
+    api = FakeApi(files=[ON_DIFF])
+    api.review_faults = [(error, "applied")]
+
+    publish_to(api, make_review())
+
+    assert len(api.review_comments) == 1
+    assert api.writes() == [("POST", COMMENTS), ("POST", REVIEWS)]
+
+
+@pytest.mark.parametrize("error", ERRORS)
+def test_review_absent_after_timeout_retries_once(error: BaseException) -> None:
+    api = FakeApi(files=[ON_DIFF])
+    api.review_faults = [(error, "lost")]
+
+    publish_to(api, make_review())
+
+    assert len(api.review_comments) == 1
+    assert api.writes() == [("POST", COMMENTS), ("POST", REVIEWS), ("POST", REVIEWS)]
+
+    failing = FakeApi(files=[ON_DIFF])
+    failing.review_faults = [(error, "lost"), (error, "lost")]
+    with pytest.raises(type(error)):
+        publish_to(failing, make_review())
+    assert failing.writes() == [("POST", COMMENTS), ("POST", REVIEWS), ("POST", REVIEWS)]
+
+
+def test_a_partially_created_review_retries_only_the_missing_comments() -> None:
+    api = FakeApi(files=[ON_DIFF])
+    api.review_faults = [(TimeoutError(), "partial")]
+    issues = [make_issue(), make_issue(line=4, issue="other")]
+
+    publish_to(api, make_review(issues=issues))
+
+    [retry] = api.reviews
+    assert [c["line"] for c in retry["comments"]] == [4]
+    assert retry["body"] == FIXED_BODY.format(n=1)
+    assert len(api.review_comments) == 2
+
+
+def test_a_late_completing_review_duplicates_once() -> None:
+    api = FakeApi(files=[ON_DIFF])
+    api.review_faults = [(TimeoutError(), "late")]
+
+    publish_to(api, make_review())
+
+    assert len(api.review_comments) == 2
+
+
+@pytest.mark.parametrize("status", [400, 403, 404])
+def test_review_client_errors_are_not_retried(status: int) -> None:
+    api = FakeApi(files=[ON_DIFF])
+    api.review_faults = [(HTTPError("u", status, "no", None, None), "lost")]
+
+    with pytest.raises(HTTPError):
+        publish_to(api, make_review())
+
+    assert api.writes() == [("POST", COMMENTS), ("POST", REVIEWS)]
+
+
+UNPROCESSABLE = HTTPError("u", 422, "unprocessable", None, None)
+BAD_GATEWAY = HTTPError("u", 502, "bad gateway", None, None)
+
+
+@pytest.mark.parametrize(
+    "faults",
+    [[UNPROCESSABLE], [BAD_GATEWAY, UNPROCESSABLE]],
+    ids=["first-attempt", "after-a-retry"],
+)
+def test_inline_422_skips_review_keeps_sticky(faults: list[HTTPError]) -> None:
+    api = FakeApi(files=[ON_DIFF])
+    api.review_faults = [(fault, "lost") for fault in faults]
+
+    publish_to(api, make_review())
+
+    assert api.stickies() == [BOT_STICKY]
+    assert api.reviews == []
+    assert api.writes() == [("POST", COMMENTS)] + [("POST", REVIEWS)] * len(faults)
+
+
+@pytest.mark.parametrize("rendered", LEAKY_HTML.values(), ids=LEAKY_HTML.keys())
+def test_a_rendered_leak_in_an_inline_body_withholds_everything(rendered: str) -> None:
+    api = FakeApi(files=[ON_DIFF], render=lambda text: rendered if "ai-review:fp" in text else "ok")
+
+    publish_to(api, make_review())
+
+    withheld = "output withheld (rendered GitHub token pattern)"
+    assert api.stickies() == [render_unavailable(withheld, SHA)]
+    assert api.writes() == [("POST", COMMENTS)]
+
+
+def test_a_withheld_sticky_never_gets_inline_comments() -> None:
+    api = FakeApi(files=[ON_DIFF])
+
+    publish_to(api, make_review(changes=[f"see {TOKEN}"]))
+
+    assert api.writes() == [("POST", COMMENTS)]
+    assert FILES not in [path.partition("?")[0] for _, path, _ in api.calls]
+
+
+def boom(text: str) -> str:
+    raise TimeoutError
+
+
+@pytest.mark.parametrize(
+    "render",
+    [
+        lambda text: boom(text) if "ai-review:fp" in text and "second" in text else "ok",
+        lambda text: boom(text) if "ai-review:fp" in text else LEAKY_HTML["href"],
+    ],
+    ids=["last-inline-body", "leak-then-failure"],
+)
+def test_an_inline_render_failure_makes_no_public_writes(render: Callable[[str], str]) -> None:
+    issues = [make_issue(issue="first"), make_issue(line=4, issue="second")]
+    api = FakeApi(files=[ON_DIFF], render=render)
+
+    with pytest.raises(TimeoutError):
+        publish_to(api, make_review(issues=issues))
+
+    assert api.writes() == []
+
+
+@pytest.mark.parametrize(
+    ("review", "existing", "posts"),
+    [
+        (make_review(), [], 1),
+        (make_review(verdict="approve", changes=[], issues=[]), [], 0),
+        (make_review(), [seen(make_issue(), 1)], 0),
+        (make_review(issues=[make_issue(line=99)]), [], 0),
+    ],
+    ids=["created", "clean", "all-deduplicated", "off-diff-only"],
+)
+@pytest.mark.parametrize("fault", [None, UNPROCESSABLE], ids=["ok", "422"])
+def test_post_check_marks_sticky_stale(
+    review: dict[str, Any],
+    existing: list[dict[str, Any]],
+    posts: int,
+    fault: HTTPError | None,
+) -> None:
+    api = FakeApi(heads=[SHA, NEW_HEAD], files=[ON_DIFF], review_comments=existing)
+    api.review_faults = [(fault, "lost")] if fault else []
+
+    publish_to(api, review)
+
+    assert api.stickies() == [render_stale(review, SHA, NEW_HEAD)]
+    expected = [("POST", COMMENTS)] + [("POST", REVIEWS)] * posts + PATCH_FIRST
+    assert api.writes() == expected
+
+
 ENV = {
     "GITHUB_TOKEN": "tok",
     "GITHUB_REPOSITORY": REPO,
@@ -1208,3 +1571,24 @@ def test_main_returns_zero_after_publishing() -> None:
 def test_main_lets_a_missing_environment_variable_exit() -> None:
     with pytest.raises(SystemExit):
         main({}, PublishGithub("tok", request_func=FakeApi()))
+
+
+@pytest.mark.parametrize(
+    ("faults", "attempts"),
+    [
+        ([(HTTPError("u", 403, "no", None, None), "lost")], 1),
+        ([(TimeoutError(), "lost")] * 2, 2),
+    ],
+    ids=["403", "two-ambiguous-failures"],
+)
+def test_post_check_runs_when_the_inline_review_raises(
+    faults: list[tuple[BaseException, str]], attempts: int
+) -> None:
+    api = FakeApi(heads=[SHA, NEW_HEAD], files=[ON_DIFF])
+    api.review_faults = faults
+
+    with pytest.raises(type(faults[0][0])):
+        publish_to(api, make_review())
+
+    assert api.stickies() == [render_stale(make_review(), SHA, NEW_HEAD)]
+    assert api.writes() == [("POST", COMMENTS)] + [("POST", REVIEWS)] * attempts + PATCH_FIRST

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import html
 import http.client
 import json
@@ -7,7 +8,7 @@ import os
 import re
 import sys
 import unicodedata
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from functools import partial
 from pathlib import Path
 from typing import Any, Literal, TypedDict
@@ -61,6 +62,8 @@ JsonDict = dict[str, Any]
 JsonValue = Any
 RequestFunc = Callable[[str, str, JsonDict | None], JsonValue]
 HTML_TAG = re.compile(r"<[^>]*>")
+HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)")
+FINGERPRINT = re.compile(r"<!-- ai-review:fp ([0-9a-f]{16}) -->")
 REQUIRED_ENV = ("GITHUB_TOKEN", "GITHUB_REPOSITORY", "PR_NUMBER", "REVIEWED_SHA", "REVIEW_RESULT")
 JOB_FAILURES = {"failure": "review job failed", "cancelled": "review job cancelled or timed out"}
 JSON_TYPES = {"object": dict, "array": list, "string": str, "null": type(None)}
@@ -324,6 +327,31 @@ def publishable_body(review: Review, reviewed_sha: str, head_sha: str, secrets: 
     return _withheld(reason, reviewed_sha)
 
 
+def right_lines(patch: str) -> set[int]:
+    lines: set[int] = set()
+    current = 0
+    for text in patch.split("\n"):
+        if header := HUNK_HEADER.match(text):
+            current = int(header[1])
+        elif current and text.startswith(("+", " ")):
+            lines.add(current)
+            current += 1
+    return lines
+
+
+def fingerprint(issue: Issue) -> str:
+    text = " ".join(issue["issue"].split()).casefold()
+    return hashlib.sha256(f"{issue['path']}\0{text}".encode()).hexdigest()[:16]
+
+
+def render_inline(issue: Issue) -> str:
+    return (
+        f"**{issue['severity']}**: {_line(issue['issue'])}\n\n"
+        f"Fix: {_line(issue['fix'])}\n\n"
+        f"<!-- ai-review:fp {fingerprint(issue)} -->"
+    )
+
+
 class PublishGithub:
     def __init__(
         self,
@@ -343,6 +371,18 @@ class PublishGithub:
 
     def list_comments(self, repo: str, number: int) -> list[JsonDict]:
         return self._paginate(f"/repos/{repo}/issues/{number}/comments")
+
+    def list_files(self, repo: str, number: int) -> list[JsonDict]:
+        return self._paginate(f"/repos/{repo}/pulls/{number}/files")
+
+    def list_review_comments(self, repo: str, number: int) -> list[JsonDict]:
+        return self._paginate(f"/repos/{repo}/pulls/{number}/comments")
+
+    def create_review(
+        self, repo: str, number: int, commit_id: str, body: str, comments: list[JsonDict]
+    ) -> None:
+        payload = {"commit_id": commit_id, "body": body, "event": "COMMENT", "comments": comments}
+        self._request_func("POST", f"/repos/{repo}/pulls/{number}/reviews", payload)
 
     def create_comment(self, repo: str, number: int, body: str) -> None:
         self._request_func("POST", f"/repos/{repo}/issues/{number}/comments", {"body": body})
@@ -394,40 +434,107 @@ class PublishGithub:
         return (json.loads(text) if text else {}) if decode else text
 
 
-def safe_body(github: PublishGithub, repo: str, body: str, reviewed_sha: str) -> str:
-    reason = _find_body_leak(body, [])
-    if reason is None:
-        rendered = github.render_markdown(repo, body)
-        visible = html.unescape(HTML_TAG.sub("", rendered))
-        if leak := find_leak([rendered, visible], []):
-            reason = f"rendered {leak}"
-    if reason is None:
-        return body
-    return _withheld(reason, reviewed_sha)
+def _leak_reason(github: PublishGithub, repo: str, body: str) -> str | None:
+    if reason := _find_body_leak(body, []):
+        return reason
+    rendered = github.render_markdown(repo, body)
+    visible = html.unescape(HTML_TAG.sub("", rendered))
+    leak = find_leak([rendered, visible], [])
+    return f"rendered {leak}" if leak else None
+
+
+def safe_body(
+    github: PublishGithub, repo: str, body: str, reviewed_sha: str, inline: Sequence[str] = ()
+) -> str:
+    reasons = [_leak_reason(github, repo, text) for text in (body, *inline)]
+    if reason := next((r for r in reasons if r), None):
+        return _withheld(reason, reviewed_sha)
+    return body
+
+
+def _is_bot(comment: JsonDict) -> bool:
+    return (comment.get("user") or {}).get("login") == BOT_LOGIN
 
 
 def _is_own_sticky(comment: JsonDict) -> bool:
-    user = comment.get("user") or {}
-    return comment["body"].splitlines()[:1] == [STICKY_MARKER] and user.get("login") == BOT_LOGIN
+    return comment["body"].splitlines()[:1] == [STICKY_MARKER] and _is_bot(comment)
 
 
 def _own_stickies(github: PublishGithub, repo: str, number: int) -> list[JsonDict]:
     return [c for c in github.list_comments(repo, number) if _is_own_sticky(c)]
 
 
-def upsert_sticky(github: PublishGithub, repo: str, number: int, body: str) -> None:
+def _with_one_retry(write: Callable[[], None]) -> None:
     for attempt in range(2):
-        stickies = _own_stickies(github, repo, number)
-        outdated = [c for c in stickies if c["body"] != body]
         try:
-            if not stickies:
-                github.create_comment(repo, number, body)
-            for sticky in outdated:
-                github.update_comment(repo, sticky["id"], body)
+            write()
             return
         except (HTTPError, OSError, http.client.HTTPException) as error:
             if attempt or (isinstance(error, HTTPError) and error.code < 500):
                 raise
+
+
+def upsert_sticky(github: PublishGithub, repo: str, number: int, body: str) -> None:
+    def write() -> None:
+        stickies = _own_stickies(github, repo, number)
+        if not stickies:
+            github.create_comment(repo, number, body)
+        for sticky in stickies:
+            if sticky["body"] != body:
+                github.update_comment(repo, sticky["id"], body)
+
+    _with_one_retry(write)
+
+
+def _seen_fingerprints(github: PublishGithub, repo: str, number: int) -> set[str]:
+    comments = github.list_review_comments(repo, number)
+    return {fp for c in comments if _is_bot(c) for fp in FINGERPRINT.findall(c["body"])}
+
+
+def _inline_comments(
+    github: PublishGithub, repo: str, number: int, issues: list[Issue]
+) -> list[tuple[str, JsonDict]]:
+    if not issues:
+        return []
+    paths = {issue["path"] for issue in issues}
+    files = github.list_files(repo, number)
+    lines = {
+        f["filename"]: right_lines(f.get("patch") or "") for f in files if f["filename"] in paths
+    }
+    seen = _seen_fingerprints(github, repo, number)
+    comments: list[tuple[str, JsonDict]] = []
+    for issue in issues:
+        mark = fingerprint(issue)
+        if issue["line"] in lines.get(issue["path"], ()) and mark not in seen:
+            seen.add(mark)
+            comment = {"path": issue["path"], "line": issue["line"], "side": "RIGHT"}
+            comments.append((mark, comment | {"body": render_inline(issue)}))
+    return comments
+
+
+def post_inline(
+    github: PublishGithub,
+    repo: str,
+    number: int,
+    reviewed_sha: str,
+    comments: list[tuple[str, JsonDict]],
+) -> None:
+    def write() -> None:
+        seen = _seen_fingerprints(github, repo, number)
+        pending = [comment for mark, comment in comments if mark not in seen]
+        if not pending:
+            return
+        body = (
+            f"AI review: {len(pending)} inline finding(s) on `{reviewed_sha}`; "
+            "summary in the AI review comment."
+        )
+        try:
+            github.create_review(repo, number, reviewed_sha, body, pending)
+        except HTTPError as error:
+            if error.code != 422:
+                raise
+
+    _with_one_retry(write)
 
 
 def _upsert_review(
@@ -454,12 +561,20 @@ def publish(
         if not any(head_lines.intersection(sticky["body"].splitlines()) for sticky in stickies):
             _upsert_review(github, repo, number, result, reviewed_sha, head)
         return
-    body = _upsert_review(github, repo, number, result, reviewed_sha, head)
-    if body != render_sticky(result, reviewed_sha):
+    normal = render_sticky(result, reviewed_sha)
+    sticky = publishable_body(result, reviewed_sha, head, [])
+    inline = _inline_comments(github, repo, number, result["issues"]) if sticky == normal else []
+    body = safe_body(github, repo, sticky, reviewed_sha, [c["body"] for _, c in inline])
+    upsert_sticky(github, repo, number, body)
+    if body != normal:
         return
-    latest = github.pull_head_sha(repo, number)
-    if latest != reviewed_sha:
-        _upsert_review(github, repo, number, result, reviewed_sha, latest)
+    try:
+        if inline:
+            post_inline(github, repo, number, reviewed_sha, inline)
+    finally:
+        latest = github.pull_head_sha(repo, number)
+        if latest != reviewed_sha:
+            _upsert_review(github, repo, number, result, reviewed_sha, latest)
 
 
 def _result_from_env(env: Mapping[str, str]) -> Review | str:
