@@ -859,6 +859,8 @@ def publish_to(api: FakeApi, result: dict[str, Any] | str) -> None:
 
 OLD_STICKY = render_sticky(make_review(verdict="approve"), SHA)
 NEWER_STICKY = render_sticky(make_review(verdict="approve"), NEW_HEAD)
+UNAVAILABLE_FOR_HEAD = render_unavailable("busy", NEW_HEAD)
+WITHHELD_FOR_HEAD = render_unavailable("output withheld (GitHub token pattern)", NEW_HEAD)
 OLDER_STICKY = render_sticky(make_review(verdict="approve"), "b" * 40)
 NEWER_STALE = render_stale(make_review(verdict="approve"), NEW_HEAD, "c" * 40)
 PATCH_FIRST = [("PATCH", f"/repos/{REPO}/issues/comments/1")]
@@ -872,6 +874,8 @@ PATCH_FIRST = [("PATCH", f"/repos/{REPO}/issues/comments/1")]
         ([comment(OLDER_STICKY, 1)], PATCH_FIRST),
         ([comment(NEWER_STICKY, 1)], []),
         ([comment(NEWER_STALE, 1)], []),
+        ([comment(UNAVAILABLE_FOR_HEAD, 1)], []),
+        ([comment(WITHHELD_FOR_HEAD, 1)], []),
         ([comment(OLD_STICKY, 1), comment(NEWER_STICKY, 2)], []),
     ],
     ids=[
@@ -880,6 +884,8 @@ PATCH_FIRST = [("PATCH", f"/repos/{REPO}/issues/comments/1")]
         "sticky-for-an-older-commit",
         "sticky-for-the-head",
         "stale-sticky-for-the-head",
+        "unavailable-sticky-for-the-head",
+        "withheld-sticky-for-the-head",
         "mixed",
     ],
 )

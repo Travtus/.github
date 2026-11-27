@@ -286,13 +286,16 @@ def render_stale(review: Review, reviewed_sha: str, head_sha: str) -> str:
     return render_sticky(review, reviewed_sha, notice)
 
 
+def _unavailable_commit_line(sha: str) -> str:
+    return f"Commit {_code(sha)}: the reviewer will review on the next push, or re-run this job."
+
+
 def render_unavailable(reason: str, reviewed_sha: str) -> str:
     return (
         f"{STICKY_MARKER}\n"
         f"{UNAVAILABLE_TITLE}\n\n"
         f"AI review unavailable: {_line(reason)}\n\n"
-        f"Commit {_code(reviewed_sha)}: the reviewer will review on the next push, "
-        "or re-run this job.\n"
+        f"{_unavailable_commit_line(reviewed_sha)}\n"
     )
 
 
@@ -446,9 +449,9 @@ def publish(
             upsert_sticky(github, repo, number, body)
         return
     if head != reviewed_sha:
-        head_line = _reviewed_line(head)
+        head_lines = {_reviewed_line(head), _unavailable_commit_line(head)}
         stickies = _own_stickies(github, repo, number)
-        if not any(head_line in sticky["body"].splitlines() for sticky in stickies):
+        if not any(head_lines.intersection(sticky["body"].splitlines()) for sticky in stickies):
             _upsert_review(github, repo, number, result, reviewed_sha, head)
         return
     body = _upsert_review(github, repo, number, result, reviewed_sha, head)
