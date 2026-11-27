@@ -1498,7 +1498,23 @@ ENV = {
     ("overrides", "expected"),
     [
         ({"OUTCOME": "ok", "FINDINGS": raw(make_review())}, render_sticky(make_review(), SHA)),
-        ({"OUTCOME": "agent timed out"}, render_unavailable("agent timed out", SHA)),
+        ({"OUTCOME": "timeout"}, render_unavailable("agent timed out", SHA)),
+        (
+            {"OUTCOME": "insufficient_time"},
+            render_unavailable("not enough time left after setup", SHA),
+        ),
+        ({"OUTCOME": "usage_limit"}, render_unavailable("Claude usage limit reached", SHA)),
+        ({"OUTCOME": "agent_failed"}, render_unavailable("agent failed", SHA)),
+        ({"OUTCOME": "invalid_output"}, render_unavailable("invalid agent output", SHA)),
+        (
+            {"OUTCOME": "output_withheld"},
+            render_unavailable("output withheld by the credential scan", SHA),
+        ),
+        ({"OUTCOME": "agent timed out"}, render_unavailable("unknown review outcome", SHA)),
+        ({"OUTCOME": "[x](http://evil)"}, render_unavailable("unknown review outcome", SHA)),
+        ({"OUTCOME": "ghp_" + "a" * 36}, render_unavailable("unknown review outcome", SHA)),
+        ({"OUTCOME": "skip"}, render_unavailable("unknown review outcome", SHA)),
+        ({"OUTCOME": "review"}, render_unavailable("unknown review outcome", SHA)),
         (
             {"OUTCOME": "ok", "FINDINGS": "not json"},
             render_unavailable("invalid agent output", SHA),
@@ -1511,7 +1527,25 @@ ENV = {
             render_unavailable("review job cancelled or timed out", SHA),
         ),
     ],
-    ids=["ok", "reason", "invalid-json", "no-findings", "no-outcome", "failure", "cancelled"],
+    ids=[
+        "ok",
+        "timeout",
+        "insufficient-time",
+        "usage-limit",
+        "agent-failed",
+        "invalid-output",
+        "output-withheld",
+        "free-text",
+        "markdown-link",
+        "fake-token",
+        "skip",
+        "review",
+        "invalid-json",
+        "no-findings",
+        "no-outcome",
+        "failure",
+        "cancelled",
+    ],
 )
 def test_publish_from_env_maps_review_result(overrides: dict[str, str], expected: str) -> None:
     api = FakeApi()
@@ -1562,7 +1596,7 @@ def test_publish_from_env_is_silent_when_the_review_was_skipped() -> None:
 def test_main_returns_zero_after_publishing() -> None:
     api = FakeApi()
 
-    status = main(ENV | {"OUTCOME": "agent timed out"}, PublishGithub("tok", request_func=api))
+    status = main(ENV | {"OUTCOME": "timeout"}, PublishGithub("tok", request_func=api))
 
     assert status == 0
     assert api.stickies() == [render_unavailable("agent timed out", SHA)]

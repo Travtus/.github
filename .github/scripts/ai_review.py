@@ -66,6 +66,25 @@ HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)")
 FINGERPRINT = re.compile(r"<!-- ai-review:fp ([0-9a-f]{16}) -->")
 REQUIRED_ENV = ("GITHUB_TOKEN", "GITHUB_REPOSITORY", "PR_NUMBER", "REVIEWED_SHA", "REVIEW_RESULT")
 JOB_FAILURES = {"failure": "review job failed", "cancelled": "review job cancelled or timed out"}
+Outcome = Literal[
+    "ok",
+    "skip",
+    "review",
+    "timeout",
+    "insufficient_time",
+    "usage_limit",
+    "agent_failed",
+    "invalid_output",
+    "output_withheld",
+]
+OUTCOMES: Mapping[str, str] = {
+    "timeout": "agent timed out",
+    "insufficient_time": "not enough time left after setup",
+    "usage_limit": "Claude usage limit reached",
+    "agent_failed": "agent failed",
+    "invalid_output": "invalid agent output",
+    "output_withheld": "output withheld by the credential scan",
+}
 JSON_TYPES = {"object": dict, "array": list, "string": str, "null": type(None)}
 
 
@@ -585,7 +604,7 @@ def _result_from_env(env: Mapping[str, str]) -> Review | str:
         raise SystemExit(f"Unexpected REVIEW_RESULT: {status}")
     outcome = env.get("OUTCOME", "")
     if outcome != "ok":
-        return outcome or "no review outcome"
+        return OUTCOMES.get(outcome, "unknown review outcome") if outcome else "no review outcome"
     try:
         return validate(env.get("FINDINGS", ""))
     except InvalidOutputError:
