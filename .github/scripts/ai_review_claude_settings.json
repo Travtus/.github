@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "deny": ["Bash", "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch", "Task", "Skill"],
+    "blockReadsOutsideWorkingDirectories": true
+  },
+  "disableAllHooks": true
+}

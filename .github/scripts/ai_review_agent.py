@@ -1,15 +1,33 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import re
+import shutil
+import signal
 import subprocess
 import sys
+import tempfile
+import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import IO, cast
 
+from ai_review import SCHEMA, InvalidOutputError, Outcome, find_leak, validate
+
 MAX_LINES = 1000
 MAX_DIFF_BYTES = 1_000_000
+AGENT_CAP_SECONDS = 720
+JOB_SECONDS = 1800
+RESERVE_SECONDS = 240
+MIN_AGENT_SECONDS = 180
+KILL_GRACE_SECONDS = 15
+MAX_FINDINGS_BYTES = 120_000
+DISALLOWED_TOOLS = "Bash,Write,Edit,NotebookEdit,WebFetch,WebSearch,Task,Skill"
+SETTINGS = Path(__file__).with_name("ai_review_claude_settings.json")
+PROMPT = Path(__file__).with_name("ai_review_prompt.md")
+USAGE_LIMIT = re.compile(r"usage limit", re.IGNORECASE)
 
 CASE_FOLDED = ("*.md", "test/**", "tests/**", "unit_test/**", "unit_tests/**", "alembic*/**")
 LOCKFILE_NAMES = (
@@ -129,7 +147,158 @@ def write_outputs(env: Mapping[str, str], outputs: Mapping[str, str]) -> None:
         sink.writelines(f"{key}={value}\n" for key, value in outputs.items())
 
 
-COMMANDS: dict[str, Callable[[Mapping[str, str]], dict[str, str]]] = {"prepare": prepare}
+def agent_cap(job_started_at: float, now: float) -> float:
+    return min(AGENT_CAP_SECONDS, job_started_at + JOB_SECONDS - RESERVE_SECONDS - now)
+
+
+def agent_env(env: Mapping[str, str], home: Path) -> dict[str, str]:
+    found = (shutil.which(tool, path=env.get("PATH")) for tool in ("node", "claude"))
+    tool_dirs = dict.fromkeys(os.path.dirname(path) for path in found if path)
+    return {
+        "PATH": ":".join([*tool_dirs, "/usr/bin", "/bin"]),
+        "HOME": str(home),
+        "TMPDIR": str(home / "tmp"),
+        "LANG": "C.UTF-8",
+        "CLAUDE_CODE_OAUTH_TOKEN": env.get("CLAUDE_CODE_OAUTH_TOKEN", ""),
+    }
+
+
+def claude_argv(prompt: str, settings: Path, apm_dir: Path, review_dir: Path) -> list[str]:
+    return [
+        "claude",
+        "-p",
+        prompt,
+        "--tools",
+        "Read,Grep,Glob",
+        "--disallowedTools",
+        DISALLOWED_TOOLS,
+        "--setting-sources",
+        "",
+        "--settings",
+        str(settings),
+        "--strict-mcp-config",
+        "--add-dir",
+        str(apm_dir),
+        "--add-dir",
+        str(review_dir),
+        "--max-turns",
+        "40",
+        "--output-format",
+        "json",
+        "--json-schema",
+        json.dumps(SCHEMA, separators=(",", ":")),
+    ]
+
+
+def _kill_group(pid: int, sig: signal.Signals) -> None:
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(pid, sig)
+
+
+def _exit_on_sigterm(signum: int, frame: object) -> None:
+    raise SystemExit(128 + signum)
+
+
+def run_process(
+    argv: Sequence[str],
+    cwd: Path,
+    env: Mapping[str, str],
+    stdout_path: Path,
+    stderr_path: Path,
+    cap: float,
+    popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
+) -> int | None:
+    previous = signal.signal(signal.SIGTERM, _exit_on_sigterm)
+    try:
+        with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
+            process = popen(
+                argv,
+                cwd=cwd,
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=stdout,
+                stderr=stderr,
+                start_new_session=True,
+            )
+            try:
+                return process.wait(timeout=cap)
+            except subprocess.TimeoutExpired:
+                _kill_group(process.pid, signal.SIGTERM)
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    process.wait(timeout=KILL_GRACE_SECONDS)
+                return None
+            finally:
+                _kill_group(process.pid, signal.SIGKILL)
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
+def classify(returncode: int, stdout: str, stderr: str, secrets: list[str]) -> tuple[Outcome, str]:
+    try:
+        result = json.loads(stdout)
+    except (ValueError, RecursionError):
+        result = None
+    if returncode != 0 or not isinstance(result, dict) or result.get("is_error"):
+        usage_limit = USAGE_LIMIT.search(f"{stdout}\n{stderr}")
+        return ("usage_limit" if usage_limit else "agent_failed"), ""
+    try:
+        review = validate(json.dumps(result.get("structured_output")))
+        if find_leak(review, secrets):
+            return "output_withheld", ""
+        findings = json.dumps(review, ensure_ascii=False, separators=(",", ":"))
+        if len(findings.encode()) > MAX_FINDINGS_BYTES:
+            return "invalid_output", ""
+    except (InvalidOutputError, ValueError):
+        return "invalid_output", ""
+    return "ok", findings
+
+
+def run_agent(
+    env: Mapping[str, str],
+    popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
+    now: Callable[[], float] = time.time,
+    prompt_file: Path = PROMPT,
+) -> dict[str, str]:
+    cap = agent_cap(float(env["JOB_STARTED_AT"]), now())
+    if cap < MIN_AGENT_SECONDS:
+        return {"outcome": "insufficient_time", "findings": ""}
+    workspace = Path(env["GITHUB_WORKSPACE"])
+    temp = Path(env["RUNNER_TEMP"])
+    agent_io = temp / "agent-io"
+    agent_io.mkdir(exist_ok=True)
+    home = Path(tempfile.mkdtemp(prefix="agent-home-", dir=temp))
+    (home / "tmp").mkdir()
+    apm_dir, review_dir = workspace / "travtus-apm", temp / "ai-review"
+    prompt = prompt_file.read_text()
+    places = {
+        "ai_review_dir": review_dir,
+        "pr_dir": workspace / "pr",
+        "apm_knowledge_dir": apm_dir / ".knowledge",
+    }
+    for name, path in places.items():
+        prompt = prompt.replace(f"{{{name}}}", str(path))
+    argv = claude_argv(prompt, SETTINGS, apm_dir, review_dir)
+    stdout_path, stderr_path = agent_io / "claude.stdout", agent_io / "claude.stderr"
+    try:
+        code = run_process(
+            argv, workspace / "pr", agent_env(env, home), stdout_path, stderr_path, cap, popen
+        )
+    except OSError:
+        return {"outcome": "agent_failed", "findings": ""}
+    outcome: Outcome = "timeout"
+    findings = ""
+    if code is not None:
+        stdout = stdout_path.read_text(errors="replace")
+        stderr = stderr_path.read_text(errors="replace")
+        outcome, findings = classify(code, stdout, stderr, [env.get("CLAUDE_CODE_OAUTH_TOKEN", "")])
+    print(f"agent outcome: {outcome}")
+    return {"outcome": outcome, "findings": findings}
+
+
+COMMANDS: dict[str, Callable[[Mapping[str, str]], dict[str, str]]] = {
+    "prepare": prepare,
+    "run-agent": run_agent,
+}
 
 
 def main(argv: Sequence[str], env: Mapping[str, str] = os.environ) -> int:
